@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "cmd/matic-init",
+    # "cmd/matic-agent", # Future
+    # "pkg/init",        # Future
+]
+resolver = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort" # Critical for PID 1 robustness and size

@@ -1,0 +1,8 @@
+[package]
+name = "matic-init"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Minimal dependencies for now
+libc = "0.2"
