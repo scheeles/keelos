@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::path::Path;
 use rustls::{Certificate, PrivateKey};
 use thiserror::Error;
