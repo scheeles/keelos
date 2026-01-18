@@ -1,0 +1,17 @@
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: cgroupfs
+failSwapOn: false
+# Use the containerd socket we established in Phase 3
+containerRuntimeEndpoint: "unix:///run/containerd/containerd.sock"
+# Allow running static pods from manifests (good for bootstrapping)
+staticPodPath: "/etc/kubernetes/manifests"
+# Minimal environment settings
+authentication:
+  anonymous:
+    enabled: true
+  webhook:
+    enabled: false
+authorization:
+  mode: AlwaysAllow
+readOnlyPort: 10255

@@ -15,7 +15,14 @@ pub enum ConfigError {
 pub struct NodeConfig {
     pub version: String,
     pub hostname: String,
+    #[serde(default)]
+    pub kubernetes: KubernetesConfig,
     pub containers: Vec<ContainerConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct KubernetesConfig {
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -35,6 +42,7 @@ impl NodeConfig {
         Self {
             version: "v1".to_string(),
             hostname: "matic-node".to_string(),
+            kubernetes: KubernetesConfig::default(),
             containers: vec![],
         }
     }

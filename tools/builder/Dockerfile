@@ -28,6 +28,11 @@ RUN export CONTAINERD_VERSION=1.7.11 && \
     tar Cxzvf /usr/local /containerd-static-${CONTAINERD_VERSION}-linux-amd64.tar.gz && \
     rm /containerd-static-${CONTAINERD_VERSION}-linux-amd64.tar.gz
 
+# Install Kubernetes binaries
+ARG K8S_VERSION=v1.29.0
+RUN wget -O /usr/local/bin/kubelet https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubelet && \
+    chmod +x /usr/local/bin/kubelet
+
 RUN export RUNC_VERSION=1.1.10 && \
     wget https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSION}/runc.amd64 && \
     install -m 755 runc.amd64 /usr/local/sbin/runc && \

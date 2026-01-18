@@ -55,6 +55,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .spawn()?;
     println!("Matic Agent spawned with PID {}", agent.id());
 
+    // Phase 4: Spawn Kubelet
+    // Phase 4: Spawn Kubelet
+    println!("Starting kubelet...");
+    
+    // Runtime Strategy: Check for local override first
+    let override_path = "/var/lib/matic/bin/kubelet";
+    let system_path = "/usr/bin/kubelet";
+    
+    let kubelet_path = if std::path::Path::new(override_path).exists() {
+        println!("*** USING OVERRIDE KUBELET: {} ***", override_path);
+        override_path
+    } else {
+        println!("Using system kubelet: {}", system_path);
+        system_path
+    };
+
+    let mut kubelet = Command::new(kubelet_path)
+        .arg("--config=/etc/kubernetes/kubelet-config.yaml")
+        .arg("--v=2") // Verbose logging for debugging
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+    println!("kubelet spawned with PID {}", kubelet.id());
+
     // Supervision loop
     loop {
         // Simple check: if either exits, we log and eventually restart
@@ -70,6 +94,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .stdout(Stdio::inherit())
                 .stderr(Stdio::inherit())
                 .spawn()?;
+        }
+        if let Ok(Some(status)) = kubelet.try_wait() {
+            println!("kubelet exited with {}. System halted.", status);
+            break; 
         }
         thread::sleep(time::Duration::from_secs(5));
     }
