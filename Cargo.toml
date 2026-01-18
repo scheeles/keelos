@@ -5,6 +5,7 @@ members = [
     "cmd/matic-agent",
     "cmd/osctl",
     "pkg/crypto",
+    "pkg/config",
     # "pkg/init",        # Future
     # "pkg/init",        # Future
 ]

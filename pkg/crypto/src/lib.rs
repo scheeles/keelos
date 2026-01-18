@@ -41,3 +41,17 @@ pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
     
     Ok((cert.serialize_pem().unwrap(), cert.serialize_private_key_pem()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_self_signed() {
+        let result = generate_self_signed();
+        assert!(result.is_ok());
+        let (cert_pem, key_pem) = result.unwrap();
+        assert!(cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(key_pem.contains("BEGIN PRIVATE KEY"));
+    }
+}

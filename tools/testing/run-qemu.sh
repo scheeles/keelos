@@ -20,7 +20,7 @@ echo ">>> Booting MaticOS in QEMU..."
 qemu-system-x86_64 \
     -kernel "${KERNEL}" \
     -initrd "${INITRAMFS}" \
-    -m 512M \
+    -m 1G \
     -nographic \
     -append "console=ttyS0 quiet loglevel=3 init=/init panic=1" \
     -no-reboot

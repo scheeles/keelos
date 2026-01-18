@@ -37,6 +37,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Matic Agent starting on {}", addr);
 
+    // Load declarative configuration
+    let config_path = "/etc/matic/node.yaml";
+    let config = if std::path::Path::new(config_path).exists() {
+        println!("Loading configuration from {}...", config_path);
+        matic_config::NodeConfig::load(config_path)?
+    } else {
+        println!("WARNING: Configuration not found at {}. Using defaults.", config_path);
+        matic_config::NodeConfig::default_config()
+    };
+    println!("Hostname: {}", config.hostname);
+
     // mTLS setup
     // For now, we assume certs are provided via /etc/matic/crypto or similar.
     // In a real bootstrap, the Agent would wait for these or generate them if requested.
@@ -70,5 +81,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matic_api::node_service_server::NodeService;
+    use matic_api::GetStatusRequest;
+
+    #[tokio::test]
+    async fn test_get_status() {
+        let service = HelperNodeService::default();
+        let request = tonic::Request::new(GetStatusRequest {});
+        let response = service.get_status(request).await.unwrap();
+        let inner = response.into_inner();
+        
+        assert_eq!(inner.hostname, "matic-node");
+        assert_eq!(inner.os_version, "0.1.0");
+    }
 }
 

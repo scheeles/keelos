@@ -18,6 +18,19 @@ This document defines the rules for contributing to MaticOS.
     *   ✅ `?` operator or explicit matching.
 *   **Async**: Use `tokio` for the Agent. `matic-init` should remain synchronous where possible for simplicity, or use a minimal executor if needed.
 
+## Testing Guidelines
+
+1.  **Unit Tests**: Mandatory for all new logic. In Rust, use `#[cfg(test)]` modules within the same file for unit tests.
+2.  **Verification Scripts**: New features affecting system boot or artifact creation must be covered by scripts in `tools/testing/`.
+3.  **E2E Tests**: Significant system-wide changes (e.g., networking, container lifecycle) require end-to-end tests using the project's QEMU-based testing framework.
+4.  **No Regressions**: All existing tests and verification scripts must pass before merging.
+
+## Commit Strategy
+
+1.  **Atomic Changes**: Each commit must represent a single, logical unit of work.
+2.  **Linear History**: Maintain a linear git history. Rebase your changes on top of `main`.
+3.  **PR Squashing**: Feature branches should be squashed into descriptive, single commits upon merging to `main`.
+
 ## Commit Messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

@@ -6,6 +6,9 @@ TARGET_DIR="${PROJECT_ROOT}/target/x86_64-unknown-linux-musl/release"
 OUTPUT_DIR="${PROJECT_ROOT}/build"
 INITRAMFS_DIR="${OUTPUT_DIR}/initramfs"
 
+rm -rf "${INITRAMFS_DIR}"
+mkdir -p "${INITRAMFS_DIR}"
+
 mkdir -p "${INITRAMFS_DIR}/bin"
 mkdir -p "${INITRAMFS_DIR}/sbin"
 mkdir -p "${INITRAMFS_DIR}/etc"
@@ -13,7 +16,19 @@ mkdir -p "${INITRAMFS_DIR}/proc"
 mkdir -p "${INITRAMFS_DIR}/sys"
 mkdir -p "${INITRAMFS_DIR}/usr/bin"
 mkdir -p "${INITRAMFS_DIR}/usr/sbin"
+mkdir -p "${INITRAMFS_DIR}/opt/cni/bin"
+mkdir -p "${INITRAMFS_DIR}/var/lib/containerd"
+mkdir -p "${INITRAMFS_DIR}/run/containerd"
+mkdir -p "${INITRAMFS_DIR}/etc/containerd"
 mkdir -p "${OUTPUT_DIR}"
+
+echo ">>> Copying external binaries..."
+# These come from the build container's /usr/local/bin or /usr/local/sbin
+cp -L /usr/local/bin/containerd* "${INITRAMFS_DIR}/usr/bin/"
+cp -L /usr/local/bin/ctr "${INITRAMFS_DIR}/usr/bin/"
+cp -L /usr/local/sbin/runc "${INITRAMFS_DIR}/usr/sbin/"
+cp -rL /opt/cni/bin/* "${INITRAMFS_DIR}/opt/cni/bin/"
+cp -L "${PROJECT_ROOT}/tools/builder/containerd-config.toml" "${INITRAMFS_DIR}/etc/containerd/config.toml"
 
 echo ">>> Building matic-init..."
 # In a real scenario, this runs inside the docker container
