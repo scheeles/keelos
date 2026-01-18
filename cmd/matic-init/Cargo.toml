@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Minimal dependencies for now
 libc = "0.2"
 nix = { version = "0.27", features = ["mount", "fs", "process"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }

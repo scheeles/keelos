@@ -14,15 +14,28 @@ use std::{thread, time, fs};
 use nix::mount::{mount, MsFlags};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
+use tracing::{info, warn, error, debug, Level};
+use tracing_subscriber::FmtSubscriber;
 
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
 fn main() {
-    println!(">>> Welcome to MaticOS v0.1 <<<");
-    println!("Init process started (PID 1).");
+    // Initialize tracing subscriber for structured logging
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .with_target(false)
+        .with_ansi(false) // No ANSI colors for serial console
+        .compact()
+        .finish();
+    
+    // Ignore errors if subscriber is already set (shouldn't happen for PID 1)
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
+    info!("Welcome to MaticOS v0.1");
+    info!("Init process started (PID 1)");
 
     if let Err(e) = run() {
-        eprintln!("FATAL: Init encountered an error: {}", e);
-        eprintln!("System entering maintenance mode...");
+        error!(error = %e, "Init encountered a fatal error");
+        error!("System entering maintenance mode");
     }
 
     // PID 1 must never exit - enter infinite maintenance loop
@@ -70,7 +83,7 @@ impl std::error::Error for InitError {}
 
 /// Mount essential API filesystems (/proc, /sys, /dev, /tmp)
 fn setup_filesystems() -> Result<(), InitError> {
-    println!("Mounting API filesystems...");
+    info!("Mounting API filesystems");
 
     // Ensure directories exist (ignore errors - they may already exist)
     let _ = fs::create_dir_all("/proc");
@@ -80,66 +93,68 @@ fn setup_filesystems() -> Result<(), InitError> {
 
     // Mount proc - critical for process management
     if let Err(e) = mount::<str, str, str, str>(Some("none"), "/proc", Some("proc"), MsFlags::empty(), None) {
-        eprintln!("WARNING: Failed to mount /proc: {}", e);
-        // proc is critical but we continue - some functionality will be degraded
+        warn!(error = %e, "Failed to mount /proc");
     } else {
-        println!("Mounted /proc");
+        debug!("Mounted /proc");
     }
 
     // Mount sysfs
     if let Err(e) = mount::<str, str, str, str>(Some("none"), "/sys", Some("sysfs"), MsFlags::empty(), None) {
-        eprintln!("WARNING: Failed to mount /sys: {}", e);
+        warn!(error = %e, "Failed to mount /sys");
     } else {
-        println!("Mounted /sys");
+        debug!("Mounted /sys");
     }
 
     // Mount devtmpfs - critical for device access
     if let Err(e) = mount::<str, str, str, str>(Some("none"), "/dev", Some("devtmpfs"), MsFlags::empty(), None) {
-        eprintln!("WARNING: Failed to mount /dev: {}", e);
+        warn!(error = %e, "Failed to mount /dev");
     } else {
-        println!("Mounted /dev");
+        debug!("Mounted /dev");
     }
 
     // Mount tmpfs
     if let Err(e) = mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None) {
-        eprintln!("WARNING: Failed to mount /tmp: {}", e);
+        warn!(error = %e, "Failed to mount /tmp");
     } else {
-        println!("Mounted /tmp");
+        debug!("Mounted /tmp");
     }
 
+    info!("API filesystems mounted");
     Ok(())
 }
 
 /// Configure basic networking (loopback and primary interface)
 fn setup_networking() {
-    println!("Initializing networking...");
+    info!("Initializing networking");
 
     // Check if busybox exists
     if fs::metadata("/bin/busybox").is_err() {
-        eprintln!("WARNING: /bin/busybox not found. Networking configuration may fail.");
+        warn!("/bin/busybox not found - networking configuration may fail");
         return;
     }
 
     // Configure loopback
     match Command::new("/bin/busybox").args(["ifconfig", "lo", "127.0.0.1", "up"]).status() {
-        Ok(status) if status.success() => println!("Configured loopback interface"),
-        Ok(status) => eprintln!("WARNING: ifconfig lo exited with: {}", status),
-        Err(e) => eprintln!("WARNING: Failed to configure loopback: {}", e),
+        Ok(status) if status.success() => debug!("Configured loopback interface"),
+        Ok(status) => warn!(exit_code = ?status.code(), "ifconfig lo failed"),
+        Err(e) => warn!(error = %e, "Failed to configure loopback"),
     }
 
     // Configure eth0 (QEMU default)
     match Command::new("/bin/busybox").args(["ifconfig", "eth0", "10.0.2.15", "netmask", "255.255.255.0", "up"]).status() {
-        Ok(status) if status.success() => println!("Configured eth0 interface"),
-        Ok(status) => eprintln!("WARNING: ifconfig eth0 exited with: {}", status),
-        Err(e) => eprintln!("WARNING: Failed to configure eth0: {}", e),
+        Ok(status) if status.success() => debug!(interface = "eth0", ip = "10.0.2.15", "Configured network interface"),
+        Ok(status) => warn!(exit_code = ?status.code(), "ifconfig eth0 failed"),
+        Err(e) => warn!(error = %e, "Failed to configure eth0"),
     }
 
     // Add default route
     match Command::new("/bin/busybox").args(["route", "add", "default", "gw", "10.0.2.2"]).status() {
-        Ok(status) if status.success() => println!("Added default route"),
-        Ok(status) => eprintln!("WARNING: route add exited with: {}", status),
-        Err(e) => eprintln!("WARNING: Failed to add default route: {}", e),
+        Ok(status) if status.success() => debug!(gateway = "10.0.2.2", "Added default route"),
+        Ok(status) => warn!(exit_code = ?status.code(), "route add failed"),
+        Err(e) => warn!(error = %e, "Failed to add default route"),
     }
+
+    info!("Networking initialized");
 }
 
 /// Check for test mode flags in kernel cmdline
@@ -147,22 +162,22 @@ fn check_test_mode() {
     let cmdline = match fs::read_to_string("/proc/cmdline") {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("WARNING: Could not read /proc/cmdline: {}", e);
+            warn!(error = %e, "Could not read /proc/cmdline");
             return;
         }
     };
 
-    println!("Kernel cmdline: {}", cmdline.trim());
+    debug!(cmdline = %cmdline.trim(), "Kernel command line");
 
     if cmdline.contains("test_update=1") {
-        println!(">>> TEST MODE: Triggering self-update in 15 seconds...");
+        info!("TEST MODE: Triggering self-update in 15 seconds");
         thread::spawn(|| {
             thread::sleep(time::Duration::from_secs(15));
-            println!(">>> Executing in-VM update test...");
+            info!("Executing in-VM update test");
             let status = Command::new("/usr/bin/osctl")
                 .args(["--endpoint", "http://127.0.0.1:50051", "update", "--source", "http://10.0.2.2:8080/update.squashfs"])
                 .status();
-            println!(">>> in-VM update test finished with: {:?}", status);
+            info!(result = ?status, "In-VM update test finished");
         });
     }
 }
@@ -171,8 +186,8 @@ fn check_test_mode() {
 fn setup_cgroups() {
     let _ = fs::create_dir_all("/sys/fs/cgroup");
     match mount::<str, str, str, str>(Some("cgroup2"), "/sys/fs/cgroup", Some("cgroup2"), MsFlags::empty(), None) {
-        Ok(_) => println!("Mounted cgroup v2 at /sys/fs/cgroup"),
-        Err(e) => eprintln!("WARNING: Failed to mount cgroup v2: {}", e),
+        Ok(_) => debug!("Mounted cgroup v2 at /sys/fs/cgroup"),
+        Err(e) => warn!(error = %e, "Failed to mount cgroup v2"),
     }
 }
 
@@ -180,7 +195,7 @@ fn setup_cgroups() {
 fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
     // Check if binary exists
     if let Err(e) = fs::metadata(path) {
-        eprintln!("ERROR: {} binary not found at {}: {}", name, path, e);
+        error!(service = name, path = path, error = %e, "Binary not found");
         return None;
     }
 
@@ -191,11 +206,11 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
 
     match cmd.spawn() {
         Ok(child) => {
-            println!("{} spawned with PID {}", name, child.id());
+            info!(service = name, pid = child.id(), "Service started");
             Some(child)
         }
         Err(e) => {
-            eprintln!("ERROR: Failed to spawn {}: {}", name, e);
+            error!(service = name, error = %e, "Failed to spawn service");
             None
         }
     }
@@ -209,12 +224,12 @@ fn reap_zombies() {
             Ok(status) => {
                 // Successfully reaped a zombie
                 if let WaitStatus::Exited(pid, code) = status {
-                    println!("Reaped zombie process {} (exit code: {})", pid, code);
+                    debug!(pid = pid.as_raw(), exit_code = code, "Reaped zombie process");
                 }
             }
             Err(nix::errno::Errno::ECHILD) => break, // No children to reap
             Err(e) => {
-                eprintln!("WARNING: waitpid error: {}", e);
+                warn!(error = %e, "waitpid error");
                 break;
             }
         }
@@ -224,17 +239,17 @@ fn reap_zombies() {
 /// Main supervision loop for system services
 fn supervise_services() -> Result<(), InitError> {
     // Start containerd
-    println!("Starting containerd...");
+    info!("Starting containerd");
     let mut containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
 
     // Start matic-agent
-    println!("Starting matic-agent...");
+    info!("Starting matic-agent");
     let mut agent = spawn_service("matic-agent", "/usr/bin/matic-agent", &[]);
 
     // Start kubelet (with override support)
-    println!("Starting kubelet...");
+    info!("Starting kubelet");
     let kubelet_path = if std::path::Path::new("/var/lib/matic/bin/kubelet").exists() {
-        println!("*** USING OVERRIDE KUBELET ***");
+        info!("Using override kubelet from /var/lib/matic/bin/kubelet");
         "/var/lib/matic/bin/kubelet"
     } else {
         "/usr/bin/kubelet"
@@ -253,10 +268,10 @@ fn supervise_services() -> Result<(), InitError> {
         // Check containerd - critical service
         if let Some(ref mut child) = containerd {
             if let Ok(Some(status)) = child.try_wait() {
-                eprintln!("CRITICAL: containerd exited with {}. Attempting restart...", status);
+                error!(service = "containerd", exit_status = %status, "Critical service exited");
                 containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
                 if containerd.is_none() {
-                    eprintln!("CRITICAL: containerd restart failed. System degraded.");
+                    error!("containerd restart failed - system degraded");
                 }
             }
         }
@@ -264,10 +279,15 @@ fn supervise_services() -> Result<(), InitError> {
         // Check matic-agent - restart with backoff
         if let Some(ref mut child) = agent {
             if let Ok(Some(status)) = child.try_wait() {
-                eprintln!("matic-agent exited with {}. Restarting (attempt {})...", status, agent_restart_count + 1);
-                
-                // Exponential backoff: 1s, 2s, 4s, 8s, ... up to max
                 let delay = std::cmp::min(1u64 << agent_restart_count, max_restart_delay_secs);
+                warn!(
+                    service = "matic-agent",
+                    exit_status = %status,
+                    attempt = agent_restart_count + 1,
+                    backoff_secs = delay,
+                    "Service exited, restarting with backoff"
+                );
+                
                 thread::sleep(time::Duration::from_secs(delay));
                 
                 agent = spawn_service("matic-agent", "/usr/bin/matic-agent", &[]);
@@ -280,7 +300,7 @@ fn supervise_services() -> Result<(), InitError> {
         // Check kubelet - log but continue (maintenance mode)
         if let Some(ref mut child) = kubelet {
             if let Ok(Some(status)) = child.try_wait() {
-                eprintln!("kubelet exited with {}. Node in maintenance mode.", status);
+                warn!(service = "kubelet", exit_status = %status, "Kubelet exited - node in maintenance mode");
                 kubelet = None; // Don't restart automatically
             }
         }
@@ -291,7 +311,7 @@ fn supervise_services() -> Result<(), InitError> {
 
 /// Infinite maintenance loop - PID 1 must never exit
 fn maintenance_loop() -> ! {
-    println!("Init process entering maintenance loop...");
+    info!("Init process entering maintenance loop");
     loop {
         // Continue reaping zombies even in maintenance mode
         reap_zombies();

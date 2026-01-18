@@ -1,8 +1,17 @@
+//! MaticOS Agent - gRPC management server
+//!
+//! The Matic Agent provides a gRPC API for managing the node, including:
+//! - Node status queries
+//! - Reboot scheduling
+//! - A/B partition updates
+
 use tonic::{transport::Server, Request, Response, Status};
 use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
 use matic_api::node::{GetStatusRequest, GetStatusResponse, RebootRequest, RebootResponse, InstallUpdateRequest, UpdateProgress};
 use std::pin::Pin;
 use tokio_stream::Stream;
+use tracing::{info, warn, debug, Level};
+use tracing_subscriber::FmtSubscriber;
 
 mod disk;
 
@@ -15,6 +24,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetStatusRequest>,
     ) -> Result<Response<GetStatusResponse>, Status> {
+        debug!("Received get_status request");
         let reply = GetStatusResponse {
             hostname: "matic-node".to_string(), // TODO: Get from hostname
             kernel_version: "6.6.14".to_string(), // TODO: Get from uname
@@ -28,7 +38,8 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<RebootRequest>,
     ) -> Result<Response<RebootResponse>, Status> {
-        println!("Reboot requested: {}", request.into_inner().reason);
+        let reason = request.into_inner().reason;
+        info!(reason = %reason, "Reboot requested");
         // In real impl, checking authZ then shelling out to reboot or trigger syscall
         Ok(Response::new(RebootResponse { scheduled: true }))
     }
@@ -46,7 +57,7 @@ impl NodeService for HelperNodeService {
         } else {
             Some(req.expected_sha256.clone())
         };
-        println!("Install update requested from source: {}", source_url);
+        info!(source = %source_url, has_sha256 = expected_sha256.is_some(), "Install update requested");
 
         let output = async_stream::try_stream! {
             yield UpdateProgress {
@@ -57,6 +68,8 @@ impl NodeService for HelperNodeService {
 
             let inactive = disk::get_inactive_partition()
                 .map_err(|e| Status::internal(format!("Failed to get inactive partition: {}", e)))?;
+            
+            debug!(device = %inactive.device, index = inactive.index, "Identified inactive partition");
             
             yield UpdateProgress {
                 percentage: 10,
@@ -83,6 +96,8 @@ impl NodeService for HelperNodeService {
             disk::switch_boot_partition(inactive.index)
                 .map_err(|e| Status::internal(format!("Failed to switch boot partition: {}", e)))?;
 
+            info!(target_partition = inactive.index, "Update installed successfully");
+            
             yield UpdateProgress {
                 percentage: 100,
                 message: "Update installed successfully. Reboot to apply.".to_string(),
@@ -96,25 +111,31 @@ impl NodeService for HelperNodeService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize tracing subscriber
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .with_target(true)
+        .compact()
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)?;
+
     let addr = "0.0.0.0:50051".parse()?;
     let node_service = HelperNodeService::default();
 
-    println!("Matic Agent starting on {}", addr);
+    info!(addr = %addr, "Matic Agent starting");
 
     // Load declarative configuration
     let config_path = "/etc/matic/node.yaml";
     let config = if std::path::Path::new(config_path).exists() {
-        println!("Loading configuration from {}...", config_path);
+        info!(path = config_path, "Loading configuration");
         matic_config::NodeConfig::load(config_path)?
     } else {
-        println!("WARNING: Configuration not found at {}. Using defaults.", config_path);
+        warn!(path = config_path, "Configuration not found, using defaults");
         matic_config::NodeConfig::default_config()
     };
-    println!("Hostname: {}", config.hostname);
+    info!(hostname = %config.hostname, "Configuration loaded");
 
     // mTLS setup
-    // For now, we assume certs are provided via /etc/matic/crypto or similar.
-    // In a real bootstrap, the Agent would wait for these or generate them if requested.
     let cert_path = "/etc/matic/crypto/server.pem";
     let key_path = "/etc/matic/crypto/server.key";
     let ca_path = "/etc/matic/crypto/ca.pem";
@@ -122,7 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut builder = Server::builder();
 
     if std::path::Path::new(cert_path).exists() {
-        println!("Enabling mTLS...");
+        info!("Enabling mTLS");
         let cert = std::fs::read_to_string(cert_path)?;
         let key = std::fs::read_to_string(key_path)?;
         let client_ca = std::fs::read_to_string(ca_path)?;
@@ -136,9 +157,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         builder = builder.tls_config(tls_config)?;
     } else {
-        println!("WARNING: Running without TLS (Certs missing at {})", cert_path);
+        warn!(cert_path = cert_path, "Running without TLS - certificates not found");
     }
 
+    info!("gRPC server ready");
     builder
         .add_service(NodeServiceServer::new(node_service))
         .serve(addr)
@@ -164,4 +186,3 @@ mod tests {
         assert_eq!(inner.os_version, "0.1.0");
     }
 }
-
