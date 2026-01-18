@@ -22,5 +22,7 @@ qemu-system-x86_64 \
     -initrd "${INITRAMFS}" \
     -m 1G \
     -nographic \
-    -append "console=ttyS0 quiet loglevel=3 init=/init panic=1" \
+    -append "console=ttyS0 quiet loglevel=3 init=/init panic=1 ${EXTRA_APPEND}" \
+    -drive file="${BUILD_DIR}/sda.img",format=raw \
+    -net nic -net user,hostfwd=tcp::50052-:50051 \
     -no-reboot

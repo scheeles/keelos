@@ -8,6 +8,22 @@ service NodeService {
   
   // Reboot the node (protected)
   rpc Reboot (RebootRequest) returns (RebootResponse);
+
+  // Install an OS update to the inactive partition
+  rpc InstallUpdate (InstallUpdateRequest) returns (stream UpdateProgress);
+}
+
+message InstallUpdateRequest {
+  // Source of the SquashFS image (URL or local path)
+  string source_url = 1;
+  // Expected SHA256 checksum (optional)
+  string expected_sha256 = 2;
+}
+
+message UpdateProgress {
+  uint32 percentage = 1;
+  string message = 2;
+  bool success = 3;
 }
 
 message GetStatusRequest {}

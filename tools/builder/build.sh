@@ -9,7 +9,7 @@ IMAGE_NAME="maticos-builder"
 
 K8S_VERSION=${K8S_VERSION:-v1.29.0}
 echo "=== Building Builder Image (K8S_VERSION=${K8S_VERSION}) ==="
-docker build --context rancher-desktop --build-arg K8S_VERSION="${K8S_VERSION}" -t "${IMAGE_NAME}" "${PROJECT_ROOT}/tools/builder"
+docker build --build-arg K8S_VERSION="${K8S_VERSION}" -t "${IMAGE_NAME}" "${PROJECT_ROOT}/tools/builder"
 
 echo "=== Entering Build Environment ==="
 # We mount the project root into /maticos
