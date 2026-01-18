@@ -27,9 +27,10 @@ This document defines the rules for contributing to MaticOS.
 
 ## Commit Strategy
 
-1.  **Atomic Changes**: Each commit must represent a single, logical unit of work.
-2.  **Linear History**: Maintain a linear git history. Rebase your changes on top of `main`.
-3.  **PR Squashing**: Feature branches should be squashed into descriptive, single commits upon merging to `main`.
+1.  **Feature Branches**: All work must be performed in feature branches. Never commit directly to `main`.
+2.  **Atomic Changes**: Each commit must represent a single, logical unit of work.
+3.  **Linear History**: Maintain a linear git history. Rebase your changes on top of `main`.
+4.  **PR Squashing**: Feature branches should be squashed into descriptive, single commits upon merging to `main`.
 
 ## Commit Messages
 
