@@ -68,7 +68,19 @@ else
         echo "Copying matic-agent to /usr/bin/matic-agent..."
         cp "${TARGET_DIR}/matic-agent" "${INITRAMFS_DIR}/usr/bin/matic-agent"
     fi
+
+    if [ -f "${TARGET_DIR}/osctl" ]; then
+        echo "Copying osctl to /usr/bin/osctl..."
+        cp "${TARGET_DIR}/osctl" "${INITRAMFS_DIR}/usr/bin/osctl"
+    fi
 fi
+
+echo ">>> Copying Busybox..."
+cp /usr/local/bin/busybox "${INITRAMFS_DIR}/bin/busybox"
+ln -sf busybox "${INITRAMFS_DIR}/bin/sh"
+ln -sf busybox "${INITRAMFS_DIR}/bin/ifconfig"
+ln -sf busybox "${INITRAMFS_DIR}/bin/route"
+ln -sf busybox "${INITRAMFS_DIR}/bin/ip"
 
 # Create essential devices (if not using devtmpfs)
 # sudo mknod -m 600 "${INITRAMFS_DIR}/dev/console" c 5 1

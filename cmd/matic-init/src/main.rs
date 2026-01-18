@@ -19,10 +19,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     mount::<str, str, str, str>(Some("none"), "/sys", Some("sysfs"), MsFlags::empty(), None)?;
     mount::<str, str, str, str>(Some("none"), "/dev", Some("devtmpfs"), MsFlags::empty(), None)?;
     mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None)?;
+    // Phase 1.6: Setup basic networking
+    println!("Initializing networking...");
+
+    // Check if busybox exists
+    if std::fs::metadata("/bin/busybox").is_err() {
+        println!("Warning: /bin/busybox not found. Networking validation may fail.");
+    }
+
+    match Command::new("/bin/busybox").args(&["ifconfig", "lo", "127.0.0.1", "up"]).status() {
+        Ok(_) => println!("ifconfig lo up: OK"),
+        Err(e) => println!("ifconfig lo failed: {}", e),
+    }
+    match Command::new("/bin/busybox").args(&["ifconfig", "eth0", "10.0.2.15", "netmask", "255.255.255.0", "up"]).status() {
+        Ok(_) => println!("ifconfig eth0 up: OK"),
+        Err(e) => println!("ifconfig eth0 failed: {}", e),
+    }
+    match Command::new("/bin/busybox").args(&["route", "add", "default", "gw", "10.0.2.2"]).status() {
+        Ok(_) => println!("route add default: OK"),
+        Err(e) => println!("route add default failed: {}", e),
+    }
+
+    if let Ok(cmdline) = fs::read_to_string("/proc/cmdline") {
+        println!("Kernel cmdline: {}", cmdline);
+        if cmdline.contains("test_update=1") {
+            println!(">>> TEST MODE: Triggering self-update in 15 seconds...");
+            thread::spawn(|| {
+                thread::sleep(time::Duration::from_secs(15));
+                println!(">>> Executing in-VM update test...");
+                let status = Command::new("/usr/bin/osctl")
+                    .arg("--endpoint")
+                    .arg("http://127.0.0.1:50051")
+                    .arg("update")
+                    .arg("--source")
+                    .arg("http://10.0.2.2:8080/update.squashfs")
+                    .status();
+                println!(">>> in-VM update test finished with: {:?}", status);
+            });
+        }
+    }
+
+    // Setup cgroup v2
+    let _ = fs::create_dir_all("/sys/fs/cgroup");
+    match mount::<str, str, str, str>(Some("cgroup2"), "/sys/fs/cgroup", Some("cgroup2"), MsFlags::empty(), None) {
+        Ok(_) => println!("Mounted cgroup v2 at /sys/fs/cgroup"),
+        Err(e) => println!("Warning: Failed to mount cgroup v2: {}", e),
+    }
 
     // Phase 3: Spawn containerd
     println!("Starting containerd...");
     let containerd_path = "/usr/bin/containerd";
+    // ... (rest of the code)
     match fs::metadata(containerd_path) {
         Ok(meta) => {
             println!("{} found: file={}, symlink={}", containerd_path, meta.is_file(), meta.file_type().is_symlink());
@@ -55,7 +102,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .spawn()?;
     println!("Matic Agent spawned with PID {}", agent.id());
 
-    // Phase 4: Spawn Kubelet
     // Phase 4: Spawn Kubelet
     println!("Starting kubelet...");
     
@@ -96,8 +142,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .spawn()?;
         }
         if let Ok(Some(status)) = kubelet.try_wait() {
-            println!("kubelet exited with {}. System halted.", status);
-            break; 
+            println!("kubelet exited with {}. Continuing (maintenance mode)...", status);
         }
         thread::sleep(time::Duration::from_secs(5));
     }

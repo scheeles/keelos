@@ -18,9 +18,14 @@ RUN apt-get update && apt-get install -y \
     gcc-x86-64-linux-gnu \
     musl-tools \
     protobuf-compiler \
-    # Cross-compilation deps if needed, though we build on Linux for Linux usually
-    # But host might be mac, so this container is Linux x86_64
+    util-linux \
+    fdisk \
+    qemu-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Install static busybox
+RUN wget -O /usr/local/bin/busybox https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox && \
+    chmod +x /usr/local/bin/busybox
 
 # Install static binaries for the runtime (x86_64)
 RUN export CONTAINERD_VERSION=1.7.11 && \

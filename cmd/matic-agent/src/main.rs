@@ -1,6 +1,10 @@
 use tonic::{transport::Server, Request, Response, Status};
 use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
-use matic_api::node::{GetStatusRequest, GetStatusResponse, RebootRequest, RebootResponse};
+use matic_api::node::{GetStatusRequest, GetStatusResponse, RebootRequest, RebootResponse, InstallUpdateRequest, UpdateProgress};
+use std::pin::Pin;
+use tokio_stream::Stream;
+
+mod disk;
 
 #[derive(Debug, Default)]
 pub struct HelperNodeService {}
@@ -28,11 +32,66 @@ impl NodeService for HelperNodeService {
         // In real impl, checking authZ then shelling out to reboot or trigger syscall
         Ok(Response::new(RebootResponse { scheduled: true }))
     }
+
+    type InstallUpdateStream = Pin<Box<dyn Stream<Item = Result<UpdateProgress, Status>> + Send>>;
+
+    async fn install_update(
+        &self,
+        request: Request<InstallUpdateRequest>,
+    ) -> Result<Response<Self::InstallUpdateStream>, Status> {
+        let req = request.into_inner();
+        let source_url = req.source_url.clone();
+        println!("Install update requested from source: {}", source_url);
+
+        let output = async_stream::try_stream! {
+            yield UpdateProgress {
+                percentage: 0,
+                message: "Identifying target partition...".to_string(),
+                success: false,
+            };
+
+            let inactive = disk::get_inactive_partition()
+                .map_err(|e| Status::internal(format!("Failed to get inactive partition: {}", e)))?;
+            
+            yield UpdateProgress {
+                percentage: 10,
+                message: format!("Target partition identified: {}", inactive.device),
+                success: false,
+            };
+
+            yield UpdateProgress {
+                percentage: 20,
+                message: format!("Downloading and flashing to {}...", inactive.device),
+                success: false,
+            };
+
+            // Disk flashing is now async
+            disk::flash_image(&source_url, &inactive.device).await
+                .map_err(|e| Status::internal(format!("Flash error: {}", e)))?;
+
+            yield UpdateProgress {
+                percentage: 80,
+                message: "Image flashed. Toggling boot flags...".to_string(),
+                success: false,
+            };
+
+            disk::switch_boot_partition(inactive.index)
+                .map_err(|e| Status::internal(format!("Failed to switch boot partition: {}", e)))?;
+
+            yield UpdateProgress {
+                percentage: 100,
+                message: "Update installed successfully. Reboot to apply.".to_string(),
+                success: true,
+            };
+        };
+
+        Ok(Response::new(Box::pin(output) as Self::InstallUpdateStream))
+    }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::0]:50051".parse()?;
+    let addr = "0.0.0.0:50051".parse()?;
     let node_service = HelperNodeService::default();
 
     println!("Matic Agent starting on {}", addr);
