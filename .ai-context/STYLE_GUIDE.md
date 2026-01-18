@@ -30,7 +30,7 @@ This document defines the rules for contributing to MaticOS.
 1.  **Feature Branches**: All work must be performed in feature branches. Never commit directly to `main`.
 2.  **Atomic Changes**: Each commit must represent a single, logical unit of work.
 3.  **Linear History**: Maintain a linear git history. Rebase your changes on top of `main`.
-4.  **PR Squashing**: Feature branches should be squashed into descriptive, single commits upon merging to `main`.
+4.  **PR Squashing**: Feature branches should be squashed into descriptive, single commits before merging
 
 ## Commit Messages
 
@@ -40,3 +40,21 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 *   `fix(init): correctly reap zombie processes`
 *   `docs: update architecture spec`
 *   `chore: bump kernel version`
+
+## Documentation Strategy
+
+1.  **Code-Level Documentation**:
+    *   **Rust**: Public items (`pub`) generally require `///` doc comments. Complex internal logic needs `//` comments explaining *why*, not *what*.
+    *   **Shell**: Functions require a header comment block explaining usage and arguments.
+2.  **Component Documentation**:
+    *   Every crate in `crates/` and significant tool in `tools/` must have a `README.md`.
+    *   Include: **Overview**, **Build Instructions**, and **Usage Examples**.
+3.  **CLI User Experience**:
+    *   All CLI tools must implement `--help`.
+    *   Use distinct 'long' vs 'short' help where applicable.
+4.  **Architecture & Design**:
+    *   Significant architectural decisions should be recorded in `docs/` (or `.ai-context` for meta-rules).
+5.  **End-User Documentation**:
+    *   **Guides & Tutorials**: Focus on "How-To" articles for common tasks.
+    *   **Installation**: Clear, step-by-step getting started guides.
+    *   **Release Notes**: Maintain a `CHANGELOG.md` or release notes for every version.
