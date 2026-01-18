@@ -9,6 +9,10 @@ This document defines the rules for contributing to MaticOS.
 3.  **Minimal Dependencies**: Audit every crate. Prefer `std` where possible.
 4.  **Static Linking**: All binaries must be statically linked (target `x86_64-unknown-linux-musl`).
 
+## Build Environment
+
+1.  **Containerized Builds**: All builds must run inside a container to ensure reproducibility and a consistent build environment across different machines.
+
 ## Rust Guidelines
 
 *   **Formatter**: Use `rustfmt` with default settings.
