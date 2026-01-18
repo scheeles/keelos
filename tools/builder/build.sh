@@ -1,8 +1,10 @@
-#!/bin/bash
+#!/bin/zsh
 set -e
 
 # Project root is 2 levels up from this script (tools/builder)
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# zsh/bash compatible way to find directory of this script
+SCRIPT_DIR=${0:a:h}
+PROJECT_ROOT="${SCRIPT_DIR}/../.."
 IMAGE_NAME="maticos-builder"
 
 echo "=== Building Builder Image ==="

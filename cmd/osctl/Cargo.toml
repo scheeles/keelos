@@ -1,0 +1,13 @@
+[package]
+name = "osctl"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+matic-api = { path = "../../pkg/api" }
+matic-crypto = { path = "../../pkg/crypto" }
+tonic = { version = "0.10", features = ["tls"] }
+prost = "0.12"
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+clap = { version = "4.4", features = ["derive"] }
+

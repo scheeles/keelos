@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package matic.v1;
+
+service NodeService {
+  // Get system health and status
+  rpc GetStatus (GetStatusRequest) returns (GetStatusResponse);
+  
+  // Reboot the node (protected)
+  rpc Reboot (RebootRequest) returns (RebootResponse);
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string hostname = 1;
+  string kernel_version = 2;
+  string os_version = 3;
+  float uptime_seconds = 4;
+}
+
+message RebootRequest {
+  // Reason for reboot (audit log)
+  string reason = 1;
+}
+
+message RebootResponse {
+  bool scheduled = 1;
+}

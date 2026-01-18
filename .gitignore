@@ -1,0 +1,20 @@
+# Rust artifacts
+target/
+**/*.rs.bk
+
+# Local build artifacts
+build/
+bin/
+
+# Cache directories
+.cache/
+
+# IDEs
+.idea/
+.vscode/
+
+# Kernels and other downloaded sources
+linux-*/
+*.tar.xz
+*.cpio.gz
+bzImage

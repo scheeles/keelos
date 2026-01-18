@@ -1,7 +1,11 @@
 [workspace]
 members = [
     "cmd/matic-init",
-    # "cmd/matic-agent", # Future
+    "pkg/api",
+    "cmd/matic-agent",
+    "cmd/osctl",
+    "pkg/crypto",
+    # "pkg/init",        # Future
     # "pkg/init",        # Future
 ]
 resolver = "2"

@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y \
     unzip \
     rsync \
     qemu-system-x86 \
+    gcc-x86-64-linux-gnu \
+    musl-tools \
+    protobuf-compiler \
     # Cross-compilation deps if needed, though we build on Linux for Linux usually
     # But host might be mac, so this container is Linux x86_64
     && rm -rf /var/lib/apt/lists/*

@@ -6,7 +6,13 @@ TARGET_DIR="${PROJECT_ROOT}/target/x86_64-unknown-linux-musl/release"
 OUTPUT_DIR="${PROJECT_ROOT}/build"
 INITRAMFS_DIR="${OUTPUT_DIR}/initramfs"
 
-mkdir -p "${INITRAMFS_DIR}/{bin,sbin,etc,proc,sys,usr/bin,usr/sbin}"
+mkdir -p "${INITRAMFS_DIR}/bin"
+mkdir -p "${INITRAMFS_DIR}/sbin"
+mkdir -p "${INITRAMFS_DIR}/etc"
+mkdir -p "${INITRAMFS_DIR}/proc"
+mkdir -p "${INITRAMFS_DIR}/sys"
+mkdir -p "${INITRAMFS_DIR}/usr/bin"
+mkdir -p "${INITRAMFS_DIR}/usr/sbin"
 mkdir -p "${OUTPUT_DIR}"
 
 echo ">>> Building matic-init..."
@@ -15,15 +21,17 @@ echo ">>> Building matic-init..."
 
 # Check if binary exists (assuming user ran build or we are mocking)
 if [ ! -f "${TARGET_DIR}/matic-init" ]; then
-    echo "WARNING: matic-init binary not found at ${TARGET_DIR}/matic-init"
+    echo "ERROR: matic-init binary not found at ${TARGET_DIR}/matic-init"
     echo "Please run: cargo build --release --target x86_64-unknown-linux-musl"
-    # Create dummy for testing if missing
-    echo "Creating dummy init for structure..."
-    touch "${INITRAMFS_DIR}/init"
-    chmod +x "${INITRAMFS_DIR}/init"
+    exit 1
 else
     echo "Copying matic-init to /init..."
     cp "${TARGET_DIR}/matic-init" "${INITRAMFS_DIR}/init"
+
+    if [ -f "${TARGET_DIR}/matic-agent" ]; then
+        echo "Copying matic-agent to /usr/bin/matic-agent..."
+        cp "${TARGET_DIR}/matic-agent" "${INITRAMFS_DIR}/usr/bin/matic-agent"
+    fi
 fi
 
 # Create essential devices (if not using devtmpfs)

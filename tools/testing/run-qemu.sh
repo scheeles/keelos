@@ -22,5 +22,5 @@ qemu-system-x86_64 \
     -initrd "${INITRAMFS}" \
     -m 512M \
     -nographic \
-    -append "console=ttyS0 quiet init=/init panic=1" \
+    -append "console=ttyS0 quiet loglevel=3 init=/init panic=1" \
     -no-reboot
