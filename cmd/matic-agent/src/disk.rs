@@ -5,14 +5,14 @@
 //! - Flashing OS images to partitions with optional SHA256 verification
 //! - Switching boot partitions using GPT attributes
 
+use futures::StreamExt;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 use std::process::Command;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
-use futures::StreamExt;
-use sha2::{Sha256, Digest};
-use tracing::{info, warn, debug, error};
+use tracing::{debug, error, info, warn};
 
 /// Information about a partition
 pub struct PartitionInfo {
@@ -36,7 +36,7 @@ const SLOT_B_INDEX: u32 = 3;
 /// - PARTUUID (looks up via /dev/disk/by-partuuid/)
 pub fn get_active_partition() -> io::Result<PartitionInfo> {
     let cmdline = fs::read_to_string("/proc/cmdline")?;
-    
+
     // Try to find root= parameter
     for param in cmdline.split_whitespace() {
         if let Some(root_value) = param.strip_prefix("root=") {
@@ -44,14 +44,14 @@ pub fn get_active_partition() -> io::Result<PartitionInfo> {
             if let Some(partuuid) = root_value.strip_prefix("PARTUUID=") {
                 return resolve_partuuid(partuuid);
             }
-            
+
             // Handle direct device path
             if root_value.starts_with("/dev/") {
                 return parse_device_path(root_value);
             }
         }
     }
-    
+
     // Fallback: try to detect from /proc/mounts
     if let Ok(mounts) = fs::read_to_string("/proc/mounts") {
         for line in mounts.lines() {
@@ -61,7 +61,7 @@ pub fn get_active_partition() -> io::Result<PartitionInfo> {
             }
         }
     }
-    
+
     // Ultimate fallback: assume slot A
     warn!("Could not determine active partition, assuming slot A");
     Ok(PartitionInfo {
@@ -73,7 +73,7 @@ pub fn get_active_partition() -> io::Result<PartitionInfo> {
 /// Resolve a PARTUUID to a device path
 fn resolve_partuuid(partuuid: &str) -> io::Result<PartitionInfo> {
     let link_path = format!("/dev/disk/by-partuuid/{}", partuuid.to_lowercase());
-    
+
     match fs::read_link(&link_path) {
         Ok(target) => {
             let target_str = target.to_string_lossy();
@@ -82,7 +82,10 @@ fn resolve_partuuid(partuuid: &str) -> io::Result<PartitionInfo> {
                 let device = format!("/dev/{}", dev_name);
                 return parse_device_path(&device);
             }
-            Err(io::Error::other(format!("Could not parse symlink target: {}", target_str)))
+            Err(io::Error::other(format!(
+                "Could not parse symlink target: {}",
+                target_str
+            )))
         }
         Err(e) => {
             warn!(partuuid = %partuuid, error = %e, "Could not resolve PARTUUID");
@@ -107,8 +110,13 @@ fn parse_device_path(device: &str) -> io::Result<PartitionInfo> {
         .rev()
         .collect::<String>()
         .parse::<u32>()
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, format!("Cannot parse partition number from: {}", device)))?;
-    
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Cannot parse partition number from: {}", device),
+            )
+        })?;
+
     Ok(PartitionInfo {
         device: device.to_string(),
         index,
@@ -118,19 +126,20 @@ fn parse_device_path(device: &str) -> io::Result<PartitionInfo> {
 /// Get the inactive partition (the one we can safely write to)
 pub fn get_inactive_partition() -> io::Result<PartitionInfo> {
     let active = get_active_partition()?;
-    
+
     // Determine the base disk device (e.g., "/dev/sda" from "/dev/sda2")
-    let base_device: String = active.device
+    let base_device: String = active
+        .device
         .chars()
         .take_while(|c| !c.is_ascii_digit())
         .collect();
-    
+
     let inactive_index = if active.index == SLOT_A_INDEX {
         SLOT_B_INDEX
     } else {
         SLOT_A_INDEX
     };
-    
+
     Ok(PartitionInfo {
         device: format!("{}{}", base_device, inactive_index),
         index: inactive_index,
@@ -143,22 +152,28 @@ pub fn get_inactive_partition() -> io::Result<PartitionInfo> {
 /// * `source_url` - HTTP(S) URL to download the image from
 /// * `target_device` - Block device to write to (e.g., "/dev/sda3")
 /// * `expected_sha256` - Optional SHA256 hash to verify the downloaded image
-pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256: Option<&str>) -> io::Result<()> {
+pub async fn flash_image(
+    source_url: &str,
+    target_device: &str,
+    expected_sha256: Option<&str>,
+) -> io::Result<()> {
     info!(url = %source_url, device = %target_device, "Starting image download");
-    
-    let response = reqwest::get(source_url).await
+
+    let response = reqwest::get(source_url)
+        .await
         .map_err(|e| io::Error::other(format!("Download failed: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err(io::Error::other(format!("Server returned error: {}", response.status())));
+        return Err(io::Error::other(format!(
+            "Server returned error: {}",
+            response.status()
+        )));
     }
 
     let content_length = response.content_length().unwrap_or(0);
     info!(size_bytes = content_length, device = %target_device, "Flashing image");
 
-    let mut file = OpenOptions::new()
-        .write(true)
-        .open(target_device).await?;
+    let mut file = OpenOptions::new().write(true).open(target_device).await?;
 
     let mut hasher = Sha256::new();
     let mut bytes_written: u64 = 0;
@@ -166,18 +181,23 @@ pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256:
     let mut stream = response.bytes_stream();
     while let Some(item) = stream.next().await {
         let chunk = item.map_err(|e| io::Error::other(format!("Stream error: {}", e)))?;
-        
+
         // Update hash
         hasher.update(&chunk);
-        
+
         // Write to device
         file.write_all(&chunk).await?;
         bytes_written += chunk.len() as u64;
-        
+
         // Progress indication (every ~10MB)
         if bytes_written % (10 * 1024 * 1024) < chunk.len() as u64 && content_length > 0 {
             let percent = (bytes_written * 100) / content_length;
-            debug!(percent = percent, bytes = bytes_written, total = content_length, "Flash progress");
+            debug!(
+                percent = percent,
+                bytes = bytes_written,
+                total = content_length,
+                "Flash progress"
+            );
         }
     }
 
@@ -193,7 +213,7 @@ pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256:
                 error!(expected = %expected, actual = %actual, "SHA256 verification failed");
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("SHA256 mismatch: expected {}, got {}", expected, actual)
+                    format!("SHA256 mismatch: expected {}, got {}", expected, actual),
                 ));
             }
             info!(hash = %actual, "SHA256 verification passed");
@@ -214,13 +234,14 @@ pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256:
 /// this will cause the target partition to be booted on next restart.
 pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
     info!(target_index = target_index, "Switching boot partition");
-    
+
     // Check if sgdisk is available
-    if !std::path::Path::new("/usr/sbin/sgdisk").exists() && 
-       !std::path::Path::new("/sbin/sgdisk").exists() {
+    if !std::path::Path::new("/usr/sbin/sgdisk").exists()
+        && !std::path::Path::new("/sbin/sgdisk").exists()
+    {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            "sgdisk not found. Cannot modify partition table."
+            "sgdisk not found. Cannot modify partition table.",
         ));
     }
 
@@ -242,7 +263,7 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
     let output = Command::new(sgdisk)
         .args([
             &format!("--attributes={}:clear:2", other_index),
-            DEFAULT_DISK
+            DEFAULT_DISK,
         ])
         .output()?;
 
@@ -256,19 +277,23 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
     let output = Command::new(sgdisk)
         .args([
             &format!("--attributes={}:set:2", target_index),
-            DEFAULT_DISK
+            DEFAULT_DISK,
         ])
         .output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(io::Error::other(
-            format!("Failed to set boot flag on partition {}: {}", target_index, stderr)
-        ));
+        return Err(io::Error::other(format!(
+            "Failed to set boot flag on partition {}: {}",
+            target_index, stderr
+        )));
     }
 
-    info!(device = format!("{}{}", DEFAULT_DISK, target_index), "Boot partition switched");
-    
+    info!(
+        device = format!("{}{}", DEFAULT_DISK, target_index),
+        "Boot partition switched"
+    );
+
     // Also update /etc/matic/boot.next as a software-level indicator (if writable)
     let boot_marker = "/tmp/boot.next";
     if let Err(e) = fs::write(boot_marker, format!("{}", target_index)) {
@@ -300,8 +325,8 @@ mod tests {
             device: "/dev/sda2".to_string(),
             index: SLOT_A_INDEX,
         };
-        
-        // Can't call get_inactive_partition directly in unit tests 
+
+        // Can't call get_inactive_partition directly in unit tests
         // (requires /proc/cmdline), but we can test the logic
         let inactive_index = if active_a.index == SLOT_A_INDEX {
             SLOT_B_INDEX

@@ -5,12 +5,15 @@
 //! - Reboot scheduling
 //! - A/B partition updates
 
-use tonic::{transport::Server, Request, Response, Status};
 use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
-use matic_api::node::{GetStatusRequest, GetStatusResponse, RebootRequest, RebootResponse, InstallUpdateRequest, UpdateProgress};
+use matic_api::node::{
+    GetStatusRequest, GetStatusResponse, InstallUpdateRequest, RebootRequest, RebootResponse,
+    UpdateProgress,
+};
 use std::pin::Pin;
 use tokio_stream::Stream;
-use tracing::{info, warn, debug, Level};
+use tonic::{transport::Server, Request, Response, Status};
+use tracing::{debug, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod disk;
@@ -26,7 +29,7 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetStatusResponse>, Status> {
         debug!("Received get_status request");
         let reply = GetStatusResponse {
-            hostname: "matic-node".to_string(), // TODO: Get from hostname
+            hostname: "matic-node".to_string(),   // TODO: Get from hostname
             kernel_version: "6.6.14".to_string(), // TODO: Get from uname
             os_version: "0.1.0".to_string(),
             uptime_seconds: 0.0, // TODO: Get from /proc/uptime
@@ -68,9 +71,9 @@ impl NodeService for HelperNodeService {
 
             let inactive = disk::get_inactive_partition()
                 .map_err(|e| Status::internal(format!("Failed to get inactive partition: {}", e)))?;
-            
+
             debug!(device = %inactive.device, index = inactive.index, "Identified inactive partition");
-            
+
             yield UpdateProgress {
                 percentage: 10,
                 message: format!("Target partition identified: {}", inactive.device),
@@ -97,7 +100,7 @@ impl NodeService for HelperNodeService {
                 .map_err(|e| Status::internal(format!("Failed to switch boot partition: {}", e)))?;
 
             info!(target_partition = inactive.index, "Update installed successfully");
-            
+
             yield UpdateProgress {
                 percentage: 100,
                 message: "Update installed successfully. Reboot to apply.".to_string(),
@@ -130,7 +133,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!(path = config_path, "Loading configuration");
         matic_config::NodeConfig::load(config_path)?
     } else {
-        warn!(path = config_path, "Configuration not found, using defaults");
+        warn!(
+            path = config_path,
+            "Configuration not found, using defaults"
+        );
         matic_config::NodeConfig::default_config()
     };
     info!(hostname = %config.hostname, "Configuration loaded");
@@ -157,7 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         builder = builder.tls_config(tls_config)?;
     } else {
-        warn!(cert_path = cert_path, "Running without TLS - certificates not found");
+        warn!(
+            cert_path = cert_path,
+            "Running without TLS - certificates not found"
+        );
     }
 
     info!("gRPC server ready");
@@ -181,7 +190,7 @@ mod tests {
         let request = tonic::Request::new(GetStatusRequest {});
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
-        
+
         assert_eq!(inner.hostname, "matic-node");
         assert_eq!(inner.os_version, "0.1.0");
     }

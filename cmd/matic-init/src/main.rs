@@ -9,12 +9,12 @@
 //! All errors are handled gracefully - the system will continue running
 //! in a degraded/maintenance mode rather than crashing.
 
-use std::process::{Child, Command, Stdio};
-use std::{thread, time, fs};
 use nix::mount::{mount, MsFlags};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
-use tracing::{info, warn, error, debug, Level};
+use std::process::{Child, Command, Stdio};
+use std::{fs, thread, time};
+use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
@@ -26,7 +26,7 @@ fn main() {
         .with_ansi(false) // No ANSI colors for serial console
         .compact()
         .finish();
-    
+
     // Ignore errors if subscriber is already set (shouldn't happen for PID 1)
     let _ = tracing::subscriber::set_global_default(subscriber);
 
@@ -92,28 +92,40 @@ fn setup_filesystems() -> Result<(), InitError> {
     let _ = fs::create_dir_all("/tmp");
 
     // Mount proc - critical for process management
-    if let Err(e) = mount::<str, str, str, str>(Some("none"), "/proc", Some("proc"), MsFlags::empty(), None) {
+    if let Err(e) =
+        mount::<str, str, str, str>(Some("none"), "/proc", Some("proc"), MsFlags::empty(), None)
+    {
         warn!(error = %e, "Failed to mount /proc");
     } else {
         debug!("Mounted /proc");
     }
 
     // Mount sysfs
-    if let Err(e) = mount::<str, str, str, str>(Some("none"), "/sys", Some("sysfs"), MsFlags::empty(), None) {
+    if let Err(e) =
+        mount::<str, str, str, str>(Some("none"), "/sys", Some("sysfs"), MsFlags::empty(), None)
+    {
         warn!(error = %e, "Failed to mount /sys");
     } else {
         debug!("Mounted /sys");
     }
 
     // Mount devtmpfs - critical for device access
-    if let Err(e) = mount::<str, str, str, str>(Some("none"), "/dev", Some("devtmpfs"), MsFlags::empty(), None) {
+    if let Err(e) = mount::<str, str, str, str>(
+        Some("none"),
+        "/dev",
+        Some("devtmpfs"),
+        MsFlags::empty(),
+        None,
+    ) {
         warn!(error = %e, "Failed to mount /dev");
     } else {
         debug!("Mounted /dev");
     }
 
     // Mount tmpfs
-    if let Err(e) = mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None) {
+    if let Err(e) =
+        mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None)
+    {
         warn!(error = %e, "Failed to mount /tmp");
     } else {
         debug!("Mounted /tmp");
@@ -134,21 +146,41 @@ fn setup_networking() {
     }
 
     // Configure loopback
-    match Command::new("/bin/busybox").args(["ifconfig", "lo", "127.0.0.1", "up"]).status() {
+    match Command::new("/bin/busybox")
+        .args(["ifconfig", "lo", "127.0.0.1", "up"])
+        .status()
+    {
         Ok(status) if status.success() => debug!("Configured loopback interface"),
         Ok(status) => warn!(exit_code = ?status.code(), "ifconfig lo failed"),
         Err(e) => warn!(error = %e, "Failed to configure loopback"),
     }
 
     // Configure eth0 (QEMU default)
-    match Command::new("/bin/busybox").args(["ifconfig", "eth0", "10.0.2.15", "netmask", "255.255.255.0", "up"]).status() {
-        Ok(status) if status.success() => debug!(interface = "eth0", ip = "10.0.2.15", "Configured network interface"),
+    match Command::new("/bin/busybox")
+        .args([
+            "ifconfig",
+            "eth0",
+            "10.0.2.15",
+            "netmask",
+            "255.255.255.0",
+            "up",
+        ])
+        .status()
+    {
+        Ok(status) if status.success() => debug!(
+            interface = "eth0",
+            ip = "10.0.2.15",
+            "Configured network interface"
+        ),
         Ok(status) => warn!(exit_code = ?status.code(), "ifconfig eth0 failed"),
         Err(e) => warn!(error = %e, "Failed to configure eth0"),
     }
 
     // Add default route
-    match Command::new("/bin/busybox").args(["route", "add", "default", "gw", "10.0.2.2"]).status() {
+    match Command::new("/bin/busybox")
+        .args(["route", "add", "default", "gw", "10.0.2.2"])
+        .status()
+    {
         Ok(status) if status.success() => debug!(gateway = "10.0.2.2", "Added default route"),
         Ok(status) => warn!(exit_code = ?status.code(), "route add failed"),
         Err(e) => warn!(error = %e, "Failed to add default route"),
@@ -175,7 +207,13 @@ fn check_test_mode() {
             thread::sleep(time::Duration::from_secs(15));
             info!("Executing in-VM update test");
             let status = Command::new("/usr/bin/osctl")
-                .args(["--endpoint", "http://127.0.0.1:50051", "update", "--source", "http://10.0.2.2:8080/update.squashfs"])
+                .args([
+                    "--endpoint",
+                    "http://127.0.0.1:50051",
+                    "update",
+                    "--source",
+                    "http://10.0.2.2:8080/update.squashfs",
+                ])
                 .status();
             info!(result = ?status, "In-VM update test finished");
         });
@@ -185,7 +223,13 @@ fn check_test_mode() {
 /// Setup cgroup v2 filesystem
 fn setup_cgroups() {
     let _ = fs::create_dir_all("/sys/fs/cgroup");
-    match mount::<str, str, str, str>(Some("cgroup2"), "/sys/fs/cgroup", Some("cgroup2"), MsFlags::empty(), None) {
+    match mount::<str, str, str, str>(
+        Some("cgroup2"),
+        "/sys/fs/cgroup",
+        Some("cgroup2"),
+        MsFlags::empty(),
+        None,
+    ) {
         Ok(_) => debug!("Mounted cgroup v2 at /sys/fs/cgroup"),
         Err(e) => warn!(error = %e, "Failed to mount cgroup v2"),
     }
@@ -224,7 +268,11 @@ fn reap_zombies() {
             Ok(status) => {
                 // Successfully reaped a zombie
                 if let WaitStatus::Exited(pid, code) = status {
-                    debug!(pid = pid.as_raw(), exit_code = code, "Reaped zombie process");
+                    debug!(
+                        pid = pid.as_raw(),
+                        exit_code = code,
+                        "Reaped zombie process"
+                    );
                 }
             }
             Err(nix::errno::Errno::ECHILD) => break, // No children to reap
@@ -254,7 +302,11 @@ fn supervise_services() -> Result<(), InitError> {
     } else {
         "/usr/bin/kubelet"
     };
-    let mut kubelet = spawn_service("kubelet", kubelet_path, &["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"]);
+    let mut kubelet = spawn_service(
+        "kubelet",
+        kubelet_path,
+        &["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"],
+    );
 
     // Track restart counts for backoff
     let mut agent_restart_count: u32 = 0;
@@ -287,9 +339,9 @@ fn supervise_services() -> Result<(), InitError> {
                     backoff_secs = delay,
                     "Service exited, restarting with backoff"
                 );
-                
+
                 thread::sleep(time::Duration::from_secs(delay));
-                
+
                 agent = spawn_service("matic-agent", "/usr/bin/matic-agent", &[]);
                 if agent.is_some() {
                     agent_restart_count = agent_restart_count.saturating_add(1);

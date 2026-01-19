@@ -2,10 +2,10 @@
 //!
 //! Provides certificate loading and self-signed generation for mTLS.
 
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -30,17 +30,17 @@ pub fn load_certs<P: AsRef<Path>>(path: P) -> Result<Vec<CertificateDer<'static>
 pub fn load_private_key<P: AsRef<Path>>(path: P) -> Result<PrivateKeyDer<'static>, CryptoError> {
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
-    
+
     // Try PKCS#8 first, then RSA, then EC
     let mut keys: Vec<PrivateKeyDer<'static>> = rustls_pemfile::private_key(&mut reader)
         .map_err(|e| CryptoError::Cert(format!("Failed to parse private key: {}", e)))?
         .into_iter()
         .collect();
-    
+
     if keys.is_empty() {
         return Err(CryptoError::Cert("No private key found".into()));
     }
-    
+
     Ok(keys.remove(0))
 }
 
@@ -48,10 +48,10 @@ pub fn load_private_key<P: AsRef<Path>>(path: P) -> Result<PrivateKeyDer<'static
 pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
-    
+
     let cert_pem = cert.cert.pem();
     let key_pem = cert.key_pair.serialize_pem();
-    
+
     Ok((cert_pem, key_pem))
 }
 
