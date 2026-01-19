@@ -33,15 +33,28 @@ cp -L "${PROJECT_ROOT}/tools/builder/containerd-config.toml" "${INITRAMFS_DIR}/e
 echo ">>> Copying GLIBC libraries (for dynamic Kubelet)..."
 mkdir -p "${INITRAMFS_DIR}/lib64"
 mkdir -p "${INITRAMFS_DIR}/lib"
+
+# Determine the GLIBC library path - support both cross-compiler and native paths
+if [ -d "/usr/x86_64-linux-gnu/lib" ]; then
+    GLIBC_LIB_PATH="/usr/x86_64-linux-gnu/lib"
+elif [ -d "/lib/x86_64-linux-gnu" ]; then
+    GLIBC_LIB_PATH="/lib/x86_64-linux-gnu"
+else
+    echo "ERROR: Could not find GLIBC library path"
+    exit 1
+fi
+echo "Using GLIBC libraries from: ${GLIBC_LIB_PATH}"
+
 # Interpreter (Must match Requesting program interpreter path)
-cp -L /usr/x86_64-linux-gnu/lib/ld-linux-x86-64.so.2 "${INITRAMFS_DIR}/lib64/"
-# Dependencies (Cross-compiler paths)
-cp -L /usr/x86_64-linux-gnu/lib/libc.so.6 "${INITRAMFS_DIR}/lib/"
-cp -L /usr/x86_64-linux-gnu/lib/libpthread.so.0 "${INITRAMFS_DIR}/lib/"
-cp -L /usr/x86_64-linux-gnu/lib/libresolv.so.2 "${INITRAMFS_DIR}/lib/"
+cp -L "${GLIBC_LIB_PATH}/ld-linux-x86-64.so.2" "${INITRAMFS_DIR}/lib64/"
+# Dependencies
+cp -L "${GLIBC_LIB_PATH}/libc.so.6" "${INITRAMFS_DIR}/lib/"
+# libpthread is often merged into libc in newer glibc versions
+if [ -f "${GLIBC_LIB_PATH}/libpthread.so.0" ]; then cp -L "${GLIBC_LIB_PATH}/libpthread.so.0" "${INITRAMFS_DIR}/lib/"; fi
+if [ -f "${GLIBC_LIB_PATH}/libresolv.so.2" ]; then cp -L "${GLIBC_LIB_PATH}/libresolv.so.2" "${INITRAMFS_DIR}/lib/"; fi
 # Optional but recommended
-if [ -f /usr/x86_64-linux-gnu/lib/libdl.so.2 ]; then cp -L /usr/x86_64-linux-gnu/lib/libdl.so.2 "${INITRAMFS_DIR}/lib/"; fi
-if [ -f /usr/x86_64-linux-gnu/lib/libm.so.6 ]; then cp -L /usr/x86_64-linux-gnu/lib/libm.so.6 "${INITRAMFS_DIR}/lib/"; fi
+if [ -f "${GLIBC_LIB_PATH}/libdl.so.2" ]; then cp -L "${GLIBC_LIB_PATH}/libdl.so.2" "${INITRAMFS_DIR}/lib/"; fi
+if [ -f "${GLIBC_LIB_PATH}/libm.so.6" ]; then cp -L "${GLIBC_LIB_PATH}/libm.so.6" "${INITRAMFS_DIR}/lib/"; fi
 
 cp -L "${PROJECT_ROOT}/tools/builder/containerd-config.toml" "${INITRAMFS_DIR}/etc/containerd/config.toml"
 

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use matic_api::node::node_service_client::NodeServiceClient;
-use matic_api::node::{GetStatusRequest, RebootRequest, InstallUpdateRequest};
+use matic_api::node::{GetStatusRequest, InstallUpdateRequest, RebootRequest};
 use tokio_stream::StreamExt;
 
 #[derive(Parser)]
@@ -108,7 +108,8 @@ mod tests {
 
     #[test]
     fn test_cli_parsing_status_custom_endpoint() {
-        let cli = Cli::try_parse_from(["osctl", "--endpoint", "http://localhost:9000", "status"]).unwrap();
+        let cli = Cli::try_parse_from(["osctl", "--endpoint", "http://localhost:9000", "status"])
+            .unwrap();
         assert!(matches!(cli.command, Commands::Status));
         assert_eq!(cli.endpoint, "http://localhost:9000");
     }
@@ -135,7 +136,13 @@ mod tests {
 
     #[test]
     fn test_cli_parsing_update() {
-        let cli = Cli::try_parse_from(["osctl", "update", "--source", "http://example.com/image.squashfs"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "osctl",
+            "update",
+            "--source",
+            "http://example.com/image.squashfs",
+        ])
+        .unwrap();
         if let Commands::Update { source, sha256 } = cli.command {
             assert_eq!(source, "http://example.com/image.squashfs");
             assert!(sha256.is_none());
@@ -147,11 +154,14 @@ mod tests {
     #[test]
     fn test_cli_parsing_update_with_sha256() {
         let cli = Cli::try_parse_from([
-            "osctl", 
-            "update", 
-            "--source", "http://example.com/image.squashfs",
-            "--sha256", "abc123def456"
-        ]).unwrap();
+            "osctl",
+            "update",
+            "--source",
+            "http://example.com/image.squashfs",
+            "--sha256",
+            "abc123def456",
+        ])
+        .unwrap();
         if let Commands::Update { source, sha256 } = cli.command {
             assert_eq!(source, "http://example.com/image.squashfs");
             assert_eq!(sha256, Some("abc123def456".to_string()));

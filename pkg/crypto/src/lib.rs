@@ -1,7 +1,11 @@
+//! Cryptography utilities for MaticOS
+//!
+//! Provides certificate loading and self-signed generation for mTLS.
+
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use rustls::{Certificate, PrivateKey};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -12,34 +16,43 @@ pub enum CryptoError {
     Cert(String),
 }
 
-pub fn load_certs<P: AsRef<Path>>(path: P) -> Result<Vec<Certificate>, CryptoError> {
-    let mut reader = BufReader::new(File::open(path)?);
+/// Load certificates from a PEM file
+pub fn load_certs<P: AsRef<Path>>(path: P) -> Result<Vec<CertificateDer<'static>>, CryptoError> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
     let certs = rustls_pemfile::certs(&mut reader)
-        .map_err(|_| CryptoError::Cert("Failed to parse certificates".into()))?
-        .into_iter()
-        .map(Certificate)
-        .collect();
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| CryptoError::Cert(format!("Failed to parse certificates: {}", e)))?;
     Ok(certs)
 }
 
-pub fn load_private_key<P: AsRef<Path>>(path: P) -> Result<PrivateKey, CryptoError> {
-    let mut reader = BufReader::new(File::open(path)?);
-    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut reader)
-        .map_err(|_| CryptoError::Cert("Failed to parse private keys".into()))?;
-    
+/// Load a private key from a PEM file
+pub fn load_private_key<P: AsRef<Path>>(path: P) -> Result<PrivateKeyDer<'static>, CryptoError> {
+    let file = File::open(path)?;
+    let mut reader = BufReader::new(file);
+
+    // Try PKCS#8 first, then RSA, then EC
+    let mut keys: Vec<PrivateKeyDer<'static>> = rustls_pemfile::private_key(&mut reader)
+        .map_err(|e| CryptoError::Cert(format!("Failed to parse private key: {}", e)))?
+        .into_iter()
+        .collect();
+
     if keys.is_empty() {
         return Err(CryptoError::Cert("No private key found".into()));
     }
-    
-    Ok(PrivateKey(keys.remove(0)))
+
+    Ok(keys.remove(0))
 }
 
-// Helper to generate a self-signed cert for bootstrapping/tests
+/// Generate a self-signed certificate for bootstrapping/tests
 pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
-    
-    Ok((cert.serialize_pem().unwrap(), cert.serialize_private_key_pem()))
+
+    let cert_pem = cert.cert.pem();
+    let key_pem = cert.key_pair.serialize_pem();
+
+    Ok((cert_pem, key_pem))
 }
 
 #[cfg(test)]

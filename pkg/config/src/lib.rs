@@ -106,12 +106,10 @@ containers: []
             kubernetes: KubernetesConfig {
                 version: Some("1.28.0".to_string()),
             },
-            containers: vec![
-                ContainerConfig {
-                    name: "nginx".to_string(),
-                    image: "nginx:latest".to_string(),
-                },
-            ],
+            containers: vec![ContainerConfig {
+                name: "nginx".to_string(),
+                image: "nginx:latest".to_string(),
+            }],
         };
 
         let yaml = serde_yaml::to_string(&config).unwrap();

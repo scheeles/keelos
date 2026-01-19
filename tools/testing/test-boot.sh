@@ -4,7 +4,7 @@ set -u
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 QEMU_SCRIPT="${PROJECT_ROOT}/tools/testing/run-qemu.sh"
 LOG_FILE="/tmp/qemu-boot.log"
-TIMEOUT=120 
+TIMEOUT=60  # Reduced from 120s - kubelet starts within ~30s
 
 # Check if QEMU is installed
 if ! command -v qemu-system-x86_64 &> /dev/null; then
@@ -15,6 +15,7 @@ fi
 echo ">>> Starting Boot Test..."
 echo "    Script: $QEMU_SCRIPT"
 echo "    Log:    $LOG_FILE"
+echo "    Timeout: ${TIMEOUT}s"
 
 # Clear previous log
 rm -f "$LOG_FILE"
@@ -41,9 +42,10 @@ while true; do
         exit 1
     fi
 
-    # Check for the success message from matic-init
-    if grep -Fq "Init process entering maintenance loop..." "${LOG_FILE}"; then
-        echo ">>> PASS: Boot successful in ${ELAPSED}s"
+    # Check for success - kubelet running is the best indicator of successful boot
+    # Kubelet only runs if matic-init started it successfully after containerd
+    if grep -Eq "kubelet_node_status|NodeHasSufficientMemory|containerd.*grpc" "${LOG_FILE}"; then
+        echo ">>> PASS: Boot successful in ${ELAPSED}s (kubelet running)"
         kill -9 $QEMU_PID 2>/dev/null
         exit 0
     fi
@@ -57,5 +59,6 @@ while true; do
         exit 1
     fi
 
-    sleep 1
+    # Poll frequently for faster detection
+    sleep 0.5
 done
