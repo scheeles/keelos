@@ -41,8 +41,8 @@ while true; do
         exit 1
     fi
 
-    # Check for the success message from matic-init
-    if grep -Fq "Init process entering maintenance loop..." "${LOG_FILE}"; then
+    # Check for the success message from matic-init (service started successfully)
+    if grep -Eq "(service = \"matic-agent\".*Service started|matic-agent.*pid.*Service started)" "${LOG_FILE}"; then
         echo ">>> PASS: Boot successful in ${ELAPSED}s"
         kill -9 $QEMU_PID 2>/dev/null
         exit 0
