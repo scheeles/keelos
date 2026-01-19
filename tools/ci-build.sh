@@ -24,7 +24,11 @@ echo ">>> Building Kernel..."
 echo ">>> Building Initramfs..."
 ./tools/builder/initramfs-build.sh
 
-# 5. Run Integration/Boot Test
+# 5. Setup Test Disk (required for QEMU boot test)
+echo ">>> Setting up test disk..."
+./tools/testing/setup-test-disk.sh
+
+# 6. Run Integration/Boot Test
 echo ">>> Running QEMU Boot Test..."
 ./tools/testing/test-boot.sh
 
