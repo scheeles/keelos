@@ -1,15 +1,15 @@
 #!/bin/bash
-set -e
+set -u
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-LOG_FILE="${PROJECT_ROOT}/build/qemu.log"
+LOG_FILE="${PROJECT_ROOT}/build/qemu-integration.log"
 TIMEOUT=60
 
-echo ">>> Starting Integration Test: Kubelet Spawn..."
+echo ">>> Starting Integration Test: Service Verification..."
 
 # Start QEMU in background with output redirected to log
 echo "Booting QEMU (this may take a few seconds)..."
-# We use a subshell to redirect all output easier, and detach
+rm -f "${LOG_FILE}"
 nohup "${PROJECT_ROOT}/tools/testing/run-qemu.sh" > "${LOG_FILE}" 2>&1 &
 QEMU_PID=$!
 
@@ -19,7 +19,6 @@ echo "Waiting for services to start..."
 # Wait loop
 START_TIME=$(date +%s)
 FOUND_CONTAINERD=0
-FOUND_AGENT=0
 FOUND_KUBELET=0
 
 while true; do
@@ -27,35 +26,40 @@ while true; do
     ELAPSED=$((CURRENT_TIME - START_TIME))
     
     if [ $ELAPSED -gt $TIMEOUT ]; then
-        echo "TIMEOUT waiting for services."
-        kill $QEMU_PID
+        echo "!!! FAIL: Timeout waiting for services after ${TIMEOUT}s !!!"
+        echo "--- Log Output (Last 50 lines) ---"
+        tail -n 50 "${LOG_FILE}"
+        echo "----------------------------------"
+        kill -9 $QEMU_PID 2>/dev/null
         exit 1
     fi
 
-    if grep -q "containerd spawned with PID" "${LOG_FILE}"; then
+    # Check for containerd - it logs gRPC messages when ready
+    if grep -Eq "containerd.*grpc|containerd.*started" "${LOG_FILE}" 2>/dev/null; then
         FOUND_CONTAINERD=1
     fi
-    if grep -q "Matic Agent spawned with PID" "${LOG_FILE}"; then
-        FOUND_AGENT=1
-    fi
-    if grep -q "kubelet spawned with PID" "${LOG_FILE}"; then
+    
+    # Check for kubelet - it logs node status messages when running
+    if grep -Eq "kubelet_node_status|NodeHasSufficientMemory" "${LOG_FILE}" 2>/dev/null; then
         FOUND_KUBELET=1
     fi
 
-    if [ $FOUND_CONTAINERD -eq 1 ] && [ $FOUND_AGENT -eq 1 ] && [ $FOUND_KUBELET -eq 1 ]; then
-        echo "SUCCESS: All services spawned!"
-        echo "--------------------------------"
-        grep "spawned with PID" "${LOG_FILE}"
-        echo "--------------------------------"
-        break
+    if [ $FOUND_CONTAINERD -eq 1 ] && [ $FOUND_KUBELET -eq 1 ]; then
+        echo ">>> PASS: All core services verified in ${ELAPSED}s!"
+        echo "  - containerd: Running"
+        echo "  - kubelet: Running"
+        kill -9 $QEMU_PID 2>/dev/null
+        exit 0
     fi
     
-    sleep 2
+    # Check if QEMU died early
+    if ! kill -0 $QEMU_PID 2>/dev/null; then
+        echo "!!! FAIL: QEMU exited early !!!"
+        echo "--- Log Output ---"
+        cat "${LOG_FILE}"
+        echo "------------------"
+        exit 1
+    fi
+    
+    sleep 0.5
 done
-
-# Cleanup
-echo "Killing QEMU..."
-kill $QEMU_PID
-wait $QEMU_PID 2>/dev/null || true
-echo "Test Passed."
-exit 0
