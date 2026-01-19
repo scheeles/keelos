@@ -13,6 +13,12 @@ mkdir -p "${CACHE_DIR}"
 mkdir -p "${BUILD_DIR}"
 mkdir -p "${OUTPUT_DIR}"
 
+# Skip build if kernel already exists (e.g., from cache)
+if [ -f "${OUTPUT_DIR}/bzImage" ]; then
+    echo ">>> Kernel already exists at ${OUTPUT_DIR}/bzImage, skipping build"
+    exit 0
+fi
+
 echo ">>> Checking for Kernel Source Tarball..."
 if [ ! -f "${CACHE_DIR}/linux.tar.xz" ]; then
     echo "Downloading Kernel ${KERNEL_VERSION}..."

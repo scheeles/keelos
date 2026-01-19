@@ -4,7 +4,7 @@ set -u
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 QEMU_SCRIPT="${PROJECT_ROOT}/tools/testing/run-qemu.sh"
 LOG_FILE="/tmp/qemu-boot.log"
-TIMEOUT=120 
+TIMEOUT=60  # Reduced from 120s - kubelet starts within ~30s
 
 # Check if QEMU is installed
 if ! command -v qemu-system-x86_64 &> /dev/null; then
@@ -15,6 +15,7 @@ fi
 echo ">>> Starting Boot Test..."
 echo "    Script: $QEMU_SCRIPT"
 echo "    Log:    $LOG_FILE"
+echo "    Timeout: ${TIMEOUT}s"
 
 # Clear previous log
 rm -f "$LOG_FILE"
@@ -58,5 +59,6 @@ while true; do
         exit 1
     fi
 
-    sleep 1
+    # Poll frequently for faster detection
+    sleep 0.5
 done

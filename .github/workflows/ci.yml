@@ -131,6 +131,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-kernel-sources
 
+      # Cache built kernel to avoid ~20min rebuild when only Rust code changes
+      - name: Cache Built Kernel
+        uses: actions/cache@v4
+        with:
+          path: build/kernel
+          key: ${{ runner.os }}-kernel-build-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/kernel-config') }}
+          restore-keys: |
+            ${{ runner.os }}-kernel-build-
+
       - name: Build Builder Image
         uses: docker/build-push-action@v5
         with:
@@ -164,7 +173,7 @@ jobs:
         if: always()
         run: |
           # Fix ownership of files created by docker (root) so GitHub Actions can cache/cleanup
-          sudo chown -R $USER:$USER target ~/.cargo .cache
+          sudo chown -R $USER:$USER target ~/.cargo .cache build || true
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
