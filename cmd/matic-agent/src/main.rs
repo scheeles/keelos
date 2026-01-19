@@ -145,8 +145,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matic_api::node_service_server::NodeService;
-    use matic_api::GetStatusRequest;
+    use matic_api::node::node_service_server::NodeService;
+    use matic_api::node::GetStatusRequest;
 
     #[tokio::test]
     async fn test_get_status() {

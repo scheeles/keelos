@@ -93,3 +93,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn test_cli_parsing_status() {
+        let cli = Cli::try_parse_from(["osctl", "status"]).unwrap();
+        assert!(matches!(cli.command, Commands::Status));
+        assert_eq!(cli.endpoint, "http://[::1]:50051");
+    }
+
+    #[test]
+    fn test_cli_parsing_status_custom_endpoint() {
+        let cli = Cli::try_parse_from(["osctl", "--endpoint", "http://localhost:9000", "status"]).unwrap();
+        assert!(matches!(cli.command, Commands::Status));
+        assert_eq!(cli.endpoint, "http://localhost:9000");
+    }
+
+    #[test]
+    fn test_cli_parsing_reboot() {
+        let cli = Cli::try_parse_from(["osctl", "reboot"]).unwrap();
+        if let Commands::Reboot { reason } = cli.command {
+            assert_eq!(reason, "Manual reboot via osctl");
+        } else {
+            panic!("Expected Reboot command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_reboot_custom_reason() {
+        let cli = Cli::try_parse_from(["osctl", "reboot", "--reason", "Maintenance"]).unwrap();
+        if let Commands::Reboot { reason } = cli.command {
+            assert_eq!(reason, "Maintenance");
+        } else {
+            panic!("Expected Reboot command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_update() {
+        let cli = Cli::try_parse_from(["osctl", "update", "--source", "http://example.com/image.squashfs"]).unwrap();
+        if let Commands::Update { source, sha256 } = cli.command {
+            assert_eq!(source, "http://example.com/image.squashfs");
+            assert!(sha256.is_none());
+        } else {
+            panic!("Expected Update command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_update_with_sha256() {
+        let cli = Cli::try_parse_from([
+            "osctl", 
+            "update", 
+            "--source", "http://example.com/image.squashfs",
+            "--sha256", "abc123def456"
+        ]).unwrap();
+        if let Commands::Update { source, sha256 } = cli.command {
+            assert_eq!(source, "http://example.com/image.squashfs");
+            assert_eq!(sha256, Some("abc123def456".to_string()));
+        } else {
+            panic!("Expected Update command");
+        }
+    }
+
+    #[test]
+    fn test_cli_missing_update_source() {
+        let result = Cli::try_parse_from(["osctl", "update"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_cli_help_available() {
+        // Verify help is available without panicking
+        let _cmd = Cli::command();
+    }
+}
