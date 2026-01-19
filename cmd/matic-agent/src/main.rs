@@ -41,6 +41,11 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<Self::InstallUpdateStream>, Status> {
         let req = request.into_inner();
         let source_url = req.source_url.clone();
+        let expected_sha256 = if req.expected_sha256.is_empty() {
+            None
+        } else {
+            Some(req.expected_sha256.clone())
+        };
         println!("Install update requested from source: {}", source_url);
 
         let output = async_stream::try_stream! {
@@ -65,8 +70,8 @@ impl NodeService for HelperNodeService {
                 success: false,
             };
 
-            // Disk flashing is now async
-            disk::flash_image(&source_url, &inactive.device).await
+            // Disk flashing with optional SHA256 verification
+            disk::flash_image(&source_url, &inactive.device, expected_sha256.as_deref()).await
                 .map_err(|e| Status::internal(format!("Flash error: {}", e)))?;
 
             yield UpdateProgress {
@@ -145,8 +150,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matic_api::node_service_server::NodeService;
-    use matic_api::GetStatusRequest;
+    use matic_api::node::node_service_server::NodeService;
+    use matic_api::node::GetStatusRequest;
 
     #[tokio::test]
     async fn test_get_status() {
