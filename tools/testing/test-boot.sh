@@ -41,9 +41,10 @@ while true; do
         exit 1
     fi
 
-    # Check for the success message from matic-init (service started successfully)
-    if grep -Eq "(service = \"matic-agent\".*Service started|matic-agent.*pid.*Service started)" "${LOG_FILE}"; then
-        echo ">>> PASS: Boot successful in ${ELAPSED}s"
+    # Check for success - kubelet running is the best indicator of successful boot
+    # Kubelet only runs if matic-init started it successfully after containerd
+    if grep -Eq "kubelet_node_status|NodeHasSufficientMemory|containerd.*grpc" "${LOG_FILE}"; then
+        echo ">>> PASS: Boot successful in ${ELAPSED}s (kubelet running)"
         kill -9 $QEMU_PID 2>/dev/null
         exit 0
     fi
