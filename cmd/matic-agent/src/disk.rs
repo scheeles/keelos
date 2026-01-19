@@ -12,6 +12,7 @@ use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use futures::StreamExt;
 use sha2::{Sha256, Digest};
+use tracing::{info, warn, debug, error};
 
 /// Information about a partition
 pub struct PartitionInfo {
@@ -62,7 +63,7 @@ pub fn get_active_partition() -> io::Result<PartitionInfo> {
     }
     
     // Ultimate fallback: assume slot A
-    println!("WARNING: Could not determine active partition, assuming slot A");
+    warn!("Could not determine active partition, assuming slot A");
     Ok(PartitionInfo {
         device: format!("{}{}", DEFAULT_DISK, SLOT_A_INDEX),
         index: SLOT_A_INDEX,
@@ -84,7 +85,7 @@ fn resolve_partuuid(partuuid: &str) -> io::Result<PartitionInfo> {
             Err(io::Error::other(format!("Could not parse symlink target: {}", target_str)))
         }
         Err(e) => {
-            println!("WARNING: Could not resolve PARTUUID {}: {}", partuuid, e);
+            warn!(partuuid = %partuuid, error = %e, "Could not resolve PARTUUID");
             // Fallback to slot A
             Ok(PartitionInfo {
                 device: format!("{}{}", DEFAULT_DISK, SLOT_A_INDEX),
@@ -143,7 +144,7 @@ pub fn get_inactive_partition() -> io::Result<PartitionInfo> {
 /// * `target_device` - Block device to write to (e.g., "/dev/sda3")
 /// * `expected_sha256` - Optional SHA256 hash to verify the downloaded image
 pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256: Option<&str>) -> io::Result<()> {
-    println!("Downloading image from {}...", source_url);
+    info!(url = %source_url, device = %target_device, "Starting image download");
     
     let response = reqwest::get(source_url).await
         .map_err(|e| io::Error::other(format!("Download failed: {}", e)))?;
@@ -153,7 +154,7 @@ pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256:
     }
 
     let content_length = response.content_length().unwrap_or(0);
-    println!("Image size: {} bytes, flashing to {}...", content_length, target_device);
+    info!(size_bytes = content_length, device = %target_device, "Flashing image");
 
     let mut file = OpenOptions::new()
         .write(true)
@@ -176,25 +177,26 @@ pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256:
         // Progress indication (every ~10MB)
         if bytes_written % (10 * 1024 * 1024) < chunk.len() as u64 && content_length > 0 {
             let percent = (bytes_written * 100) / content_length;
-            println!("Progress: {}% ({}/{} bytes)", percent, bytes_written, content_length);
+            debug!(percent = percent, bytes = bytes_written, total = content_length, "Flash progress");
         }
     }
 
     file.flush().await?;
     file.sync_all().await?;
-    println!("Wrote {} bytes to {}", bytes_written, target_device);
+    info!(bytes = bytes_written, device = %target_device, "Image written successfully");
 
     // Verify SHA256 if provided
     if let Some(expected) = expected_sha256 {
         if !expected.is_empty() {
             let actual = format!("{:x}", hasher.finalize());
             if actual != expected.to_lowercase() {
+                error!(expected = %expected, actual = %actual, "SHA256 verification failed");
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("SHA256 mismatch: expected {}, got {}", expected, actual)
                 ));
             }
-            println!("SHA256 verification passed: {}", actual);
+            info!(hash = %actual, "SHA256 verification passed");
         }
     }
 
@@ -211,7 +213,7 @@ pub async fn flash_image(source_url: &str, target_device: &str, expected_sha256:
 /// For systems using GRUB or other bootloaders that respect these flags,
 /// this will cause the target partition to be booted on next restart.
 pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
-    println!("Switching boot partition to index {}...", target_index);
+    info!(target_index = target_index, "Switching boot partition");
     
     // Check if sgdisk is available
     if !std::path::Path::new("/usr/sbin/sgdisk").exists() && 
@@ -246,7 +248,7 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        println!("WARNING: Failed to clear boot flag from partition {}: {}", other_index, stderr);
+        warn!(partition = other_index, error = %stderr, "Failed to clear boot flag");
         // Continue anyway - setting the target is more important
     }
 
@@ -265,12 +267,12 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
         ));
     }
 
-    println!("Boot partition switched to {}{}. Reboot to apply.", DEFAULT_DISK, target_index);
+    info!(device = format!("{}{}", DEFAULT_DISK, target_index), "Boot partition switched");
     
     // Also update /etc/matic/boot.next as a software-level indicator (if writable)
     let boot_marker = "/tmp/boot.next";
     if let Err(e) = fs::write(boot_marker, format!("{}", target_index)) {
-        println!("WARNING: Could not write boot marker: {}", e);
+        warn!(error = %e, "Could not write boot marker");
     }
 
     Ok(())
