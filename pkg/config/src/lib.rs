@@ -71,4 +71,69 @@ containers:
         assert_eq!(config.containers.len(), 1);
         assert_eq!(config.containers[0].name, "test-net");
     }
+
+    #[test]
+    fn test_default_config() {
+        let config = NodeConfig::default_config();
+        assert_eq!(config.version, "v1");
+        assert_eq!(config.hostname, "matic-node");
+        assert!(config.containers.is_empty());
+        assert!(config.kubernetes.version.is_none());
+    }
+
+    #[test]
+    fn test_config_with_kubernetes() {
+        let yaml = r#"
+version: v1
+hostname: k8s-node
+kubernetes:
+  version: "1.29.0"
+containers: []
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", yaml).unwrap();
+
+        let config = NodeConfig::load(file.path()).unwrap();
+        assert_eq!(config.hostname, "k8s-node");
+        assert_eq!(config.kubernetes.version, Some("1.29.0".to_string()));
+    }
+
+    #[test]
+    fn test_config_serialization() {
+        let config = NodeConfig {
+            version: "v1".to_string(),
+            hostname: "test-node".to_string(),
+            kubernetes: KubernetesConfig {
+                version: Some("1.28.0".to_string()),
+            },
+            containers: vec![
+                ContainerConfig {
+                    name: "nginx".to_string(),
+                    image: "nginx:latest".to_string(),
+                },
+            ],
+        };
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("hostname: test-node"));
+        assert!(yaml.contains("nginx:latest"));
+    }
+
+    #[test]
+    fn test_load_nonexistent_file() {
+        let result = NodeConfig::load("/nonexistent/path/config.yaml");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConfigError::Io(_)));
+    }
+
+    #[test]
+    fn test_load_invalid_yaml() {
+        let invalid_yaml = "not: valid: yaml: [";
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", invalid_yaml).unwrap();
+
+        let result = NodeConfig::load(file.path());
+        assert!(result.is_err());
+    }
 }
