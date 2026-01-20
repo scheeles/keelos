@@ -192,6 +192,7 @@ jobs:
             build/kernel/bzImage
             build/initramfs.cpio.gz
             build/sda.img
+            build/maticos.iso
           retention-days: 1
 
   # ============================================================================
