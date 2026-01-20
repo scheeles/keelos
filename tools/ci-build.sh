@@ -26,23 +26,27 @@ echo ">>> Building Kernel..."
 echo ">>> Building Initramfs..."
 ./tools/builder/initramfs-build.sh
 
+# 5. Build ISO
+echo ">>> Building ISO..."
+./tools/builder/iso-build.sh
+
 # =============================================================================
 # TEST PHASE
 # =============================================================================
 
-# 5. Verify Build Artifacts
+# 6. Verify Build Artifacts
 echo ">>> Verifying build artifacts..."
 ./tools/testing/verify-artifacts.sh
 
-# 6. Setup Test Disk (required for QEMU tests)
+# 7. Setup Test Disk (required for QEMU tests)
 echo ">>> Setting up test disk..."
 ./tools/testing/setup-test-disk.sh
 
-# 7. Boot Test - Verify system boots and kubelet starts
+# 8. Boot Test - Verify system boots and kubelet starts
 echo ">>> Running QEMU Boot Test..."
 ./tools/testing/test-boot.sh
 
-# 8. Integration Test - Verify all services spawn correctly
+# 9. Integration Test - Verify all services spawn correctly
 echo ">>> Running Integration Test..."
 ./tools/testing/test-integration.sh
 
