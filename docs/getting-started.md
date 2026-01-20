@@ -1,6 +1,24 @@
 # Getting Started with MaticOS
 
-This guide walks you through building MaticOS from source and running it locally in QEMU.
+This guide walks you through getting MaticOS running locally.
+
+## Quick Start
+
+**Option 1: Download Pre-built Image** (Recommended)
+
+Download the latest ISO from [GitHub Releases](https://github.com/scheeles/maticos/releases) and boot it:
+
+```bash
+qemu-system-x86_64 -cdrom maticos-0.1.0.iso -m 2G -serial stdio
+```
+
+For full installation options (VMs, PXE, etc.), see [Installation Guide](./installation.md).
+
+**Option 2: Build from Source**
+
+Continue reading below to build MaticOS from source.
+
+---
 
 ## Prerequisites
 

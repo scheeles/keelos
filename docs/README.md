@@ -6,6 +6,7 @@ This directory contains end-user documentation, architectural guides, and refere
 
 | Document | Description |
 |----------|-------------|
+| [Installation](./installation.md) | Install MaticOS from pre-built images (ISO, QCOW2, etc.) |
 | [Getting Started](./getting-started.md) | Build MaticOS from source and run it locally. |
 | [Using osctl](./using-osctl.md) | Remote administration with the `osctl` CLI. |
 | [Architecture](./architecture.md) | System design, boot sequence, and update mechanism. |
