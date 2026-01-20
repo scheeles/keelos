@@ -22,7 +22,11 @@ echo ">>> Building Kernel..."
 echo ">>> Building Initramfs..."
 ./tools/builder/initramfs-build.sh
 
-# 4. Setup Test Disk (needed for QEMU tests)
+# 4. Build ISO
+echo ">>> Building ISO..."
+./tools/builder/iso-build.sh
+
+# 5. Setup Test Disk (needed for QEMU tests)
 echo ">>> Setting up test disk..."
 ./tools/testing/setup-test-disk.sh
 
