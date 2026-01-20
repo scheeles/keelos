@@ -2,7 +2,36 @@
 
 `osctl` is the command-line tool for managing MaticOS nodes remotely. Since MaticOS has no SSH or shell access, `osctl` is the primary interface for administration.
 
-## Connecting to a Node
+## Installation
+
+### Download Pre-built Binary
+
+Download the latest `osctl` binary for your platform from [GitHub Releases](https://github.com/scheeles/maticos/releases).
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `osctl-Darwin_arm64.tar.gz` |
+| macOS (Intel) | `osctl-Darwin_x86.tar.gz` |
+| Linux (x86_64) | `osctl-Linux_x86.tar.gz` |
+| Linux (ARM64) | `osctl-Linux_arm64.tar.gz` |
+| Windows | `osctl-Windows_x86.zip` |
+
+```bash
+# Example for macOS ARM64
+tar -xzf osctl-Darwin_arm64.tar.gz
+sudo mv osctl /usr/local/bin/
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/scheeles/maticos.git
+cd maticos
+cargo build --release --package osctl
+# Binary is at target/release/osctl
+```
+
+---
 
 Every command requires a target node address:
 
