@@ -1,0 +1,181 @@
+name: Release MaticOS
+
+on:
+  push:
+    tags:
+      - 'maticos-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (e.g., 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            # Extract version from tag (maticos-v0.1.0 -> 0.1.0)
+            VERSION="${GITHUB_REF#refs/tags/maticos-v}"
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-release-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-release-
+            ${{ runner.os }}-buildx-
+
+      - name: Cache Cargo Registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Kernel
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/kernel
+            build/kernel
+          key: ${{ runner.os }}-kernel-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/kernel-config') }}
+
+      - name: Build Builder Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./tools/builder
+          push: false
+          load: true
+          tags: maticos-builder:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Build OS Components
+        run: |
+          mkdir -p target .cache/kernel build
+          docker run --rm \
+            -v ${{ github.workspace }}:/maticos \
+            -v ~/.cargo/registry:/root/.cargo/registry \
+            -v ~/.cargo/git:/root/.cargo/git \
+            --privileged \
+            maticos-builder:latest \
+            /maticos/tools/ci-build-only.sh
+
+      - name: Build Release Images
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/maticos \
+            --privileged \
+            maticos-builder:latest \
+            /maticos/tools/builder/build-images.sh ${{ steps.version.outputs.version }}
+
+      - name: Fix Permissions
+        if: always()
+        run: |
+          sudo chown -R $USER:$USER target ~/.cargo .cache build || true
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: maticos-iso
+          path: build/maticos-*.iso
+          retention-days: 7
+
+      - name: Upload RAW
+        uses: actions/upload-artifact@v4
+        with:
+          name: maticos-raw
+          path: build/maticos-*.raw.gz
+          retention-days: 7
+
+      - name: Upload QCOW2
+        uses: actions/upload-artifact@v4
+        with:
+          name: maticos-qcow2
+          path: build/maticos-*.qcow2
+          retention-days: 7
+
+      - name: Upload PXE Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: maticos-pxe
+          path: build/maticos-*-pxe.tar.gz
+          retention-days: 7
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Generate checksums
+        run: |
+          cd release
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/*
+          generate_release_notes: true
+          body: |
+            ## MaticOS ${{ needs.build.outputs.version }}
+            
+            ### Download Options
+            
+            | Format | Use Case |
+            |--------|----------|
+            | `.iso` | Bootable installer / live boot |
+            | `.raw.gz` | Cloud VMs, generic hypervisors |
+            | `.qcow2` | KVM / libvirt |
+            | `-pxe.tar.gz` | Network boot (bzImage + initramfs) |
+            
+            ### Verify Downloads
+            
+            ```bash
+            sha256sum -c SHA256SUMS
+            ```
