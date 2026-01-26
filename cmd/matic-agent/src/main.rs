@@ -4,6 +4,7 @@
 //! - Node status queries
 //! - Reboot scheduling
 //! - A/B partition updates
+//! - Scheduled updates with maintenance windows
 //!
 //! Additionally provides HTTP endpoints for:
 //! - /healthz - Liveness checks
@@ -12,8 +13,10 @@
 
 use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
 use matic_api::node::{
-    GetStatusRequest, GetStatusResponse, InstallUpdateRequest, RebootRequest, RebootResponse,
-    UpdateProgress,
+    CancelScheduledUpdateRequest, CancelScheduledUpdateResponse, GetStatusRequest,
+    GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse, InstallUpdateRequest,
+    RebootRequest, RebootResponse, ScheduleUpdateRequest, ScheduleUpdateResponse, UpdateProgress,
+    UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -25,9 +28,14 @@ use tracing::{debug, info, warn};
 mod disk;
 mod health;
 mod telemetry;
+mod update_scheduler;
 
-#[derive(Debug, Default)]
-pub struct HelperNodeService {}
+use update_scheduler::{UpdateScheduler, ScheduleStatus};
+
+#[derive(Debug, Clone)]
+pub struct HelperNodeService {
+    scheduler: Arc<UpdateScheduler>,
+}
 
 #[tonic::async_trait]
 impl NodeService for HelperNodeService {
@@ -118,7 +126,125 @@ impl NodeService for HelperNodeService {
 
         Ok(Response::new(Box::pin(output) as Self::InstallUpdateStream))
     }
+
+    async fn schedule_update(
+        &self,
+        request: Request<ScheduleUpdateRequest>,
+    ) -> Result<Response<ScheduleUpdateResponse>, Status> {
+        let req = request.into_inner();
+        
+        info!(
+            source = %req.source_url,
+            scheduled_at = %req.scheduled_at,
+            "Schedule update requested"
+        );
+
+        // Parse scheduled_at if provided
+        let scheduled_at = if !req.scheduled_at.is_empty() {
+            Some(
+                chrono::DateTime::parse_from_rfc3339(&req.scheduled_at)
+                    .map_err(|e| Status::invalid_argument(format!("Invalid scheduled_at: {}", e)))?
+                    .with_timezone(&chrono::Utc),
+            )
+        } else {
+            None
+        };
+
+        let maintenance_window = if req.maintenance_window_secs > 0 {
+            Some(req.maintenance_window_secs)
+        } else {
+            None
+        };
+
+        let expected_sha256 = if !req.expected_sha256.is_empty() {
+            Some(req.expected_sha256)
+        } else {
+            None
+        };
+
+        let pre_hook = if !req.pre_update_hook.is_empty() {
+            Some(req.pre_update_hook)
+        } else {
+            None
+        };
+
+        let post_hook = if !req.post_update_hook.is_empty() {
+            Some(req.post_update_hook)
+        } else {
+            None
+        };
+
+        let schedule = self
+            .scheduler
+            .schedule_update(
+                req.source_url,
+                expected_sha256,
+                scheduled_at,
+                maintenance_window,
+                req.enable_auto_rollback,
+                pre_hook,
+                post_hook,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("Failed to schedule update: {}", e)))?;
+
+        Ok(Response::new(ScheduleUpdateResponse {
+            schedule_id: schedule.id.clone(),
+            status: schedule.status.to_string(),
+            scheduled_at: schedule
+                .scheduled_at
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_default(),
+        }))
+    }
+
+    async fn get_update_schedule(
+        &self,
+        _request: Request<GetUpdateScheduleRequest>,
+    ) -> Result<Response<GetUpdateScheduleResponse>, Status> {
+        debug!("Get update schedule requested");
+
+        let schedules = self.scheduler.get_schedules().await;
+
+        let proto_schedules: Vec<ProtoUpdateSchedule> = schedules
+            .into_iter()
+            .map(|s| ProtoUpdateSchedule {
+                id: s.id,
+                source_url: s.source_url,
+                expected_sha256: s.expected_sha256.unwrap_or_default(),
+                scheduled_at: s.scheduled_at.map(|dt| dt.to_rfc3339()).unwrap_or_default(),
+                status: s.status.to_string(),
+                enable_auto_rollback: s.enable_auto_rollback,
+                created_at: s.created_at.to_rfc3339(),
+            })
+            .collect();
+
+        Ok(Response::new(GetUpdateScheduleResponse {
+            schedules: proto_schedules,
+        }))
+    }
+
+    async fn cancel_scheduled_update(
+        &self,
+        request: Request<CancelScheduledUpdateRequest>,
+    ) -> Result<Response<CancelScheduledUpdateResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(schedule_id = %req.schedule_id, "Cancel scheduled update requested");
+
+        match self.scheduler.cancel_schedule(&req.schedule_id).await {
+            Ok(_) => Ok(Response::new(CancelScheduledUpdateResponse {
+                success: true,
+                message: "Update cancelled successfully".to_string(),
+            })),
+            Err(e) => Ok(Response::new(CancelScheduledUpdateResponse {
+                success: false,
+                message: e,
+            })),
+        }
+    }
 }
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -128,7 +254,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let grpc_addr = "0.0.0.0:50051".parse()?;
     let health_addr = "0.0.0.0:9090".parse()?;
-    let node_service = HelperNodeService::default();
+    
+    // Initialize update scheduler
+    let scheduler = Arc::new(UpdateScheduler::new("/var/lib/matic/update-schedule.json"));
+    
+    // Start background executor for scheduled updates
+    let executor_scheduler = scheduler.clone();
+    tokio::spawn(async move {
+        schedule_executor(executor_scheduler).await;
+    });
+
+    let node_service = HelperNodeService {
+        scheduler: scheduler.clone(),
+    };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
 
@@ -213,6 +351,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Shutdown telemetry
     telemetry::shutdown_telemetry();
+
+    Ok(())
+}
+
+/// Background task executor for scheduled updates
+async fn schedule_executor(scheduler: Arc<UpdateScheduler>) {
+    use tokio::time::{sleep, Duration};
+
+    info!("Background schedule executor started");
+
+    loop {
+        // Check for due schedules every 30 seconds
+        sleep(Duration::from_secs(30)).await;
+
+        let due_schedules = scheduler.get_due_schedules().await;
+
+        for schedule in due_schedules {
+            info!(
+                schedule_id = %schedule.id,
+                source = %schedule.source_url,
+                "Executing scheduled update"
+            );
+
+            // Mark as running
+            let _ = scheduler
+                .update_status(&schedule.id, ScheduleStatus::Running, None)
+                .await;
+
+            // Execute the update (simplified - in real implementation would use install_update logic)
+            match execute_scheduled_update(&schedule).await {
+                Ok(_) => {
+                    info!(schedule_id = %schedule.id, "Scheduled update completed successfully");
+                    let _ = scheduler
+                        .update_status(&schedule.id, ScheduleStatus::Completed, None)
+                        .await;
+                }
+                Err(e) => {
+                    error!(schedule_id = %schedule.id, error = %e, "Scheduled update failed");
+                    let _ = scheduler
+                        .update_status(&schedule.id, ScheduleStatus::Failed, Some(e.to_string()))
+                        .await;
+                }
+            }
+        }
+    }
+}
+
+/// Execute a scheduled update
+async fn execute_scheduled_update(
+    schedule: &update_scheduler::UpdateSchedule,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Get inactive partition
+    let inactive = disk::get_inactive_partition()?;
+
+    info!(
+        device = %inactive.device,
+        source = %schedule.source_url,
+        "Starting scheduled update execution"
+    );
+
+    // Flash the image
+    disk::flash_image(
+        &schedule.source_url,
+        &inactive.device,
+        schedule.expected_sha256.as_deref(),
+    )
+    .await?;
+
+    // Switch boot partition
+    disk::switch_boot_partition(inactive.index)?;
 
     Ok(())
 }

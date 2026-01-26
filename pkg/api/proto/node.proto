@@ -11,6 +11,15 @@ service NodeService {
 
   // Install an OS update to the inactive partition
   rpc InstallUpdate (InstallUpdateRequest) returns (stream UpdateProgress);
+  
+  // Schedule an update for a future time
+  rpc ScheduleUpdate (ScheduleUpdateRequest) returns (ScheduleUpdateResponse);
+  
+  // Get current update schedule
+  rpc GetUpdateSchedule (GetUpdateScheduleRequest) returns (GetUpdateScheduleResponse);
+  
+  // Cancel scheduled update
+  rpc CancelScheduledUpdate (CancelScheduledUpdateRequest) returns (CancelScheduledUpdateResponse);
 }
 
 message InstallUpdateRequest {
@@ -24,6 +33,10 @@ message UpdateProgress {
   uint32 percentage = 1;
   string message = 2;
   bool success = 3;
+  // Optional: Estimated time remaining in seconds
+  uint32 eta_seconds = 4;
+  // Optional: Download speed in bytes/sec
+  uint64 download_speed_bps = 5;
 }
 
 message GetStatusRequest {}
@@ -42,4 +55,57 @@ message RebootRequest {
 
 message RebootResponse {
   bool scheduled = 1;
+}
+
+// Scheduling messages
+
+message ScheduleUpdateRequest {
+  string source_url = 1;
+  string expected_sha256 = 2;
+  
+  // Optional: Schedule for specific time (RFC3339 format)
+  string scheduled_at = 3;
+  
+  // Optional: Maintenance window duration in seconds
+  uint32 maintenance_window_secs = 4;
+  
+  // Optional: Enable auto-rollback on failure
+  bool enable_auto_rollback = 5;
+  
+  // Optional: Pre-update hook command
+  string pre_update_hook = 6;
+  
+  // Optional: Post-update hook command
+  string post_update_hook = 7;
+}
+
+message ScheduleUpdateResponse {
+  string schedule_id = 1;
+  string status = 2;
+  string scheduled_at = 3;
+}
+
+message GetUpdateScheduleRequest {}
+
+message GetUpdateScheduleResponse {
+  repeated UpdateSchedule schedules = 1;
+}
+
+message UpdateSchedule {
+  string id = 1;
+  string source_url = 2;
+  string expected_sha256 = 3;
+  string scheduled_at = 4;
+  string status = 5; // pending, running, completed, failed, cancelled
+  bool enable_auto_rollback = 6;
+  string created_at = 7;
+}
+
+message CancelScheduledUpdateRequest {
+  string schedule_id = 1;
+}
+
+message CancelScheduledUpdateResponse {
+  bool success = 1;
+  string message = 2;
 }
