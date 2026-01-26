@@ -165,7 +165,7 @@ impl HealthCheck for NetworkCheck {
                 let lines: Vec<&str> = content.lines().collect();
                 // Skip header lines
                 let interface_lines = &lines[2..];
-                
+
                 for line in interface_lines {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if let Some(iface) = parts.first() {
@@ -177,7 +177,7 @@ impl HealthCheck for NetworkCheck {
                         }
                     }
                 }
-                
+
                 warn!("No active network interfaces found");
                 HealthCheckResult::Fail("No active network interfaces".to_string())
             }
@@ -209,15 +209,13 @@ impl ApiCheck {
 impl HealthCheck for ApiCheck {
     async fn check(&self) -> HealthCheckResult {
         // Check if the gRPC API port is listening
-        let output = Command::new("netstat")
-            .arg("-ln")
-            .output();
+        let output = Command::new("netstat").arg("-ln").output();
 
         match output {
             Ok(result) => {
                 let stdout = String::from_utf8_lossy(&result.stdout);
                 let port_str = format!(":{}", self.port);
-                
+
                 if stdout.contains(&port_str) {
                     info!(port = %self.port, "API check passed");
                     HealthCheckResult::Pass
@@ -267,7 +265,7 @@ impl HealthChecker {
     /// Create a new health checker with default checks
     pub fn new(config: HealthCheckerConfig) -> Self {
         let mut checks: HashMap<String, Box<dyn HealthCheck>> = HashMap::new();
-        
+
         // Register default checks
         checks.insert("boot".to_string(), Box::new(BootCheck));
         checks.insert("network".to_string(), Box::new(NetworkCheck));
@@ -350,7 +348,7 @@ impl HealthChecker {
         let start = Instant::now();
         let timeout = Duration::from_secs(self.config.timeout_secs as u64);
         let retry_interval = Duration::from_secs(self.config.retry_interval_secs as u64);
-        
+
         let mut attempt = 0;
 
         loop {
@@ -411,10 +409,10 @@ mod tests {
             retry_interval_secs: 1,
             max_retries: 3,
         };
-        
+
         let checker = HealthChecker::new(config);
         let (status, results) = checker.run_all_checks().await;
-        
+
         assert!(!results.is_empty());
         // Status depends on environment, just verify it runs
         assert!(matches!(

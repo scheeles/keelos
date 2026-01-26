@@ -5,6 +5,7 @@
 //! - Flashing OS images to partitions with optional SHA256 verification
 //! - Switching boot partitions using GPT attributes
 
+
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -13,8 +14,6 @@ use std::process::Command;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, warn};
-use chrono::Utc;
-
 
 /// Information about a partition
 pub struct PartitionInfo {
@@ -342,7 +341,7 @@ fn save_rollback_state(state: &RollbackState) -> io::Result<()> {
 
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    
+
     fs::write(ROLLBACK_STATE_FILE, json)?;
     debug!("Saved rollback state");
     Ok(())
@@ -355,14 +354,17 @@ pub fn record_active_partition_for_rollback() -> io::Result<()> {
     state.previous_partition = Some(active.index);
     state.last_update_time = Some(chrono::Utc::now().to_rfc3339());
     save_rollback_state(&state)?;
-    info!(previous_partition = active.index, "Recorded partition for rollback");
+    info!(
+        previous_partition = active.index,
+        "Recorded partition for rollback"
+    );
     Ok(())
 }
 
 /// Rollback to the previous partition
 pub fn rollback_to_previous_partition() -> io::Result<()> {
     let state = load_rollback_state();
-    
+
     let previous_index = state.previous_partition.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
@@ -370,11 +372,14 @@ pub fn rollback_to_previous_partition() -> io::Result<()> {
         )
     })?;
 
-    info!(target_partition = previous_index, "Rolling back to previous partition");
-    
+    info!(
+        target_partition = previous_index,
+        "Rolling back to previous partition"
+    );
+
     // Switch back to the previous partition
     switch_boot_partition(previous_index)?;
-    
+
     // Clear the rollback state
     let mut state = load_rollback_state();
     state.previous_partition = None;
@@ -394,7 +399,10 @@ pub fn increment_boot_counter() -> io::Result<()> {
     let mut state = load_rollback_state();
     state.boot_counter += 1;
     save_rollback_state(&state)?;
-    info!(boot_counter = state.boot_counter, "Incremented boot counter");
+    info!(
+        boot_counter = state.boot_counter,
+        "Incremented boot counter"
+    );
     Ok(())
 }
 
@@ -412,14 +420,16 @@ pub fn is_boot_loop() -> bool {
     const MAX_BOOT_ATTEMPTS: u32 = 3;
     let counter = get_boot_counter();
     if counter >= MAX_BOOT_ATTEMPTS {
-        warn!(boot_counter = counter, max_attempts = MAX_BOOT_ATTEMPTS, "Boot loop detected");
+        warn!(
+            boot_counter = counter,
+            max_attempts = MAX_BOOT_ATTEMPTS,
+            "Boot loop detected"
+        );
         true
     } else {
         false
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {

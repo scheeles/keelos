@@ -13,7 +13,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Update schedule entry
@@ -228,7 +228,6 @@ impl UpdateScheduler {
             Err(format!("Schedule not found: {}", id))
         }
     }
-
 
     /// Persist schedules to disk
     async fn persist_schedules(&self) -> Result<(), String> {

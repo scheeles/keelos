@@ -26,18 +26,18 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 mod disk;
 mod health;
+mod health_check;
 mod telemetry;
 mod update_scheduler;
-mod health_check;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
-use update_scheduler::{UpdateScheduler, ScheduleStatus};
+use update_scheduler::{ScheduleStatus, UpdateScheduler};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HelperNodeService {
     scheduler: Arc<UpdateScheduler>,
     health_checker: Arc<HealthChecker>,
@@ -89,6 +89,8 @@ impl NodeService for HelperNodeService {
                 percentage: 0,
                 message: "Identifying target partition...".to_string(),
                 success: false,
+                download_speed_bps: 0,
+                eta_seconds: 0,
             };
 
             let inactive = disk::get_inactive_partition()
@@ -100,12 +102,16 @@ impl NodeService for HelperNodeService {
                 percentage: 10,
                 message: format!("Target partition identified: {}", inactive.device),
                 success: false,
+                download_speed_bps: 0,
+                eta_seconds: 0,
             };
 
             yield UpdateProgress {
                 percentage: 20,
                 message: format!("Downloading and flashing to {}...", inactive.device),
                 success: false,
+                download_speed_bps: 0,
+                eta_seconds: 0,
             };
 
             // Disk flashing with optional SHA256 verification
@@ -116,6 +122,8 @@ impl NodeService for HelperNodeService {
                 percentage: 80,
                 message: "Image flashed. Toggling boot flags...".to_string(),
                 success: false,
+                download_speed_bps: 0,
+                eta_seconds: 0,
             };
 
             disk::switch_boot_partition(inactive.index)
@@ -127,6 +135,8 @@ impl NodeService for HelperNodeService {
                 percentage: 100,
                 message: "Update installed successfully. Reboot to apply.".to_string(),
                 success: true,
+                download_speed_bps: 0,
+                eta_seconds: 0,
             };
         };
 
@@ -138,7 +148,7 @@ impl NodeService for HelperNodeService {
         request: Request<ScheduleUpdateRequest>,
     ) -> Result<Response<ScheduleUpdateResponse>, Status> {
         let req = request.into_inner();
-        
+
         info!(
             source = %req.source_url,
             scheduled_at = %req.scheduled_at,
@@ -197,7 +207,6 @@ impl NodeService for HelperNodeService {
                 health_check_timeout,
                 pre_hook,
                 post_hook,
-
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to schedule update: {}", e)))?;
@@ -328,10 +337,7 @@ impl NodeService for HelperNodeService {
             .into_iter()
             .filter(|s| s.rollback_triggered)
             .map(|s| RollbackEvent {
-                timestamp: s
-                    .completed_at
-                    .map(|dt| dt.to_rfc3339())
-                    .unwrap_or_default(),
+                timestamp: s.completed_at.map(|dt| dt.to_rfc3339()).unwrap_or_default(),
                 reason: s.rollback_reason.unwrap_or_else(|| "Unknown".to_string()),
                 from_partition: "unknown".to_string(), // TODO: Track actual partition info
                 to_partition: "unknown".to_string(),   // TODO: Track actual partition info
@@ -347,8 +353,6 @@ impl NodeService for HelperNodeService {
     }
 }
 
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize OpenTelemetry telemetry
@@ -360,11 +364,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Initialize update scheduler
     let scheduler = Arc::new(UpdateScheduler::new("/var/lib/matic/update-schedule.json"));
-    
+
     // Initialize health checker
     let health_config = HealthCheckerConfig::default();
     let health_checker = Arc::new(HealthChecker::new(health_config));
-    
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
     tokio::spawn(async move {
