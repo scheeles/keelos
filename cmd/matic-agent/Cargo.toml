@@ -16,7 +16,7 @@ async-stream = "0.3"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "stream"] }
 sha2 = "0.10"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "json"] }
+tracing-subscriber = { version = "0.3", features = ["fmt", "json", "env-filter"] }
 
 # OpenTelemetry for observability
 opentelemetry = "0.21"
