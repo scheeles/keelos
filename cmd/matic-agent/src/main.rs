@@ -13,9 +13,12 @@
 
 use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
 use matic_api::node::{
-    CancelScheduledUpdateRequest, CancelScheduledUpdateResponse, GetStatusRequest,
-    GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse, InstallUpdateRequest,
-    RebootRequest, RebootResponse, ScheduleUpdateRequest, ScheduleUpdateResponse, UpdateProgress,
+    CancelScheduledUpdateRequest, CancelScheduledUpdateResponse, GetHealthRequest,
+    GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse, GetStatusRequest,
+    GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
+    HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
+    RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
+    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
     UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
@@ -31,12 +34,13 @@ mod telemetry;
 mod update_scheduler;
 mod health_check;
 
-
+use health_check::{HealthChecker, HealthCheckerConfig};
 use update_scheduler::{UpdateScheduler, ScheduleStatus};
 
 #[derive(Debug, Clone)]
 pub struct HelperNodeService {
     scheduler: Arc<UpdateScheduler>,
+    health_checker: Arc<HealthChecker>,
 }
 
 #[tonic::async_trait]
@@ -176,6 +180,12 @@ impl NodeService for HelperNodeService {
             None
         };
 
+        let health_check_timeout = if req.health_check_timeout_secs > 0 {
+            Some(req.health_check_timeout_secs)
+        } else {
+            None
+        };
+
         let schedule = self
             .scheduler
             .schedule_update(
@@ -184,8 +194,10 @@ impl NodeService for HelperNodeService {
                 scheduled_at,
                 maintenance_window,
                 req.enable_auto_rollback,
+                health_check_timeout,
                 pre_hook,
                 post_hook,
+
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to schedule update: {}", e)))?;
@@ -245,7 +257,96 @@ impl NodeService for HelperNodeService {
             })),
         }
     }
+
+    async fn get_health(
+        &self,
+        _request: Request<GetHealthRequest>,
+    ) -> Result<Response<GetHealthResponse>, Status> {
+        debug!("Get health requested");
+
+        let (status, executions) = self.health_checker.run_all_checks().await;
+
+        let proto_checks: Vec<ProtoHealthCheckResult> = executions
+            .into_iter()
+            .map(|exec| ProtoHealthCheckResult {
+                name: exec.name,
+                status: match exec.result {
+                    health_check::HealthCheckResult::Pass => "pass".to_string(),
+                    health_check::HealthCheckResult::Fail(_) => "fail".to_string(),
+                    health_check::HealthCheckResult::Unknown(_) => "unknown".to_string(),
+                },
+                message: exec.result.message(),
+                duration_ms: exec.duration_ms,
+            })
+            .collect();
+
+        Ok(Response::new(GetHealthResponse {
+            status: status.to_string(),
+            checks: proto_checks,
+            last_update_time: chrono::Utc::now().to_rfc3339(),
+        }))
+    }
+
+    async fn trigger_rollback(
+        &self,
+        request: Request<TriggerRollbackRequest>,
+    ) -> Result<Response<TriggerRollbackResponse>, Status> {
+        let reason = request.into_inner().reason;
+
+        info!(reason = %reason, "Manual rollback requested");
+
+        // Perform rollback
+        match disk::rollback_to_previous_partition() {
+            Ok(_) => {
+                info!("Rollback completed successfully");
+                Ok(Response::new(TriggerRollbackResponse {
+                    success: true,
+                    message: "Rollback completed. System will reboot to previous partition."
+                        .to_string(),
+                }))
+            }
+            Err(e) => {
+                warn!(error = %e, "Rollback failed");
+                Ok(Response::new(TriggerRollbackResponse {
+                    success: false,
+                    message: format!("Rollback failed: {}", e),
+                }))
+            }
+        }
+    }
+
+    async fn get_rollback_history(
+        &self,
+        _request: Request<GetRollbackHistoryRequest>,
+    ) -> Result<Response<GetRollbackHistoryResponse>, Status> {
+        debug!("Get rollback history requested");
+
+        // Get all schedules that have been rolled back
+        let schedules = self.scheduler.get_schedules().await;
+
+        let rollback_events: Vec<RollbackEvent> = schedules
+            .into_iter()
+            .filter(|s| s.rollback_triggered)
+            .map(|s| RollbackEvent {
+                timestamp: s
+                    .completed_at
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default(),
+                reason: s.rollback_reason.unwrap_or_else(|| "Unknown".to_string()),
+                from_partition: "unknown".to_string(), // TODO: Track actual partition info
+                to_partition: "unknown".to_string(),   // TODO: Track actual partition info
+                automatic: s.enable_auto_rollback,
+            })
+            .collect();
+
+        info!(count = rollback_events.len(), "Retrieved rollback history");
+
+        Ok(Response::new(GetRollbackHistoryResponse {
+            events: rollback_events,
+        }))
+    }
 }
+
 
 
 #[tokio::main]
@@ -260,6 +361,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize update scheduler
     let scheduler = Arc::new(UpdateScheduler::new("/var/lib/matic/update-schedule.json"));
     
+    // Initialize health checker
+    let health_config = HealthCheckerConfig::default();
+    let health_checker = Arc::new(HealthChecker::new(health_config));
+    
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
     tokio::spawn(async move {
@@ -268,6 +373,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let node_service = HelperNodeService {
         scheduler: scheduler.clone(),
+        health_checker: health_checker.clone(),
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
