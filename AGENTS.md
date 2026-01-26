@@ -42,6 +42,17 @@ Key characteristics:
 
 6. **Tests Required**: All new code requires unit tests. System changes require verification scripts in `tools/testing/`.
 
+## PR Reviews
+
+All pull requests are reviewed by Claude AI to ensure:
+- Code quality and adherence to the style guide
+- Proper error handling (especially for PID 1 components)
+- Test coverage for new features
+- Documentation updates when needed
+- Compliance with commit message conventions
+
+Claude will provide feedback on the PR and may request changes before approval.
+
 ## Build & Test
 
 ```bash
