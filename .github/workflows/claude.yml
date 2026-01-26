@@ -1,0 +1,64 @@
+name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
+      (github.event_name == 'pull_request')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+          # Configure Claude's behavior for MaticOS project
+          claude_args: |
+            --model claude-opus-4-1-20250805
+            --max-turns 10
+            --system-prompt "You are reviewing code for MaticOS, an immutable API-driven Linux distribution. Follow these critical rules:
+            1. Review .ai-context/STYLE_GUIDE.md first
+            2. Ensure matic-init (PID 1) code NEVER panics - must use Result<T, E>
+            3. Verify all binaries are statically linked (musl)
+            4. Check that containerized builds are used
+            5. Require unit tests for all new code
+            6. Verify commit messages follow Conventional Commits
+            7. Check Rust code passes clippy::pedantic
+            8. Ensure no unwrap() or expect() in runtime code
+            9. Verify async code uses tokio properly
+            10. Check documentation updates when needed"
+
+          # Optional: Advanced settings configuration
+          # settings: |
+          #   {
+          #     "env": {
+          #       "RUST_BACKTRACE": "1"
+          #     }
+          #   }
