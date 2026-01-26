@@ -20,6 +20,15 @@ service NodeService {
   
   // Cancel scheduled update
   rpc CancelScheduledUpdate (CancelScheduledUpdateRequest) returns (CancelScheduledUpdateResponse);
+  
+  // Get system health status
+  rpc GetHealth (GetHealthRequest) returns (GetHealthResponse);
+  
+  // Manually trigger rollback
+  rpc TriggerRollback (TriggerRollbackRequest) returns (TriggerRollbackResponse);
+  
+  // Get rollback history
+  rpc GetRollbackHistory (GetRollbackHistoryRequest) returns (GetRollbackHistoryResponse);
 }
 
 message InstallUpdateRequest {
@@ -72,11 +81,14 @@ message ScheduleUpdateRequest {
   // Optional: Enable auto-rollback on failure
   bool enable_auto_rollback = 5;
   
+  // Optional: Health check timeout in seconds (default: 300)
+  uint32 health_check_timeout_secs = 6;
+  
   // Optional: Pre-update hook command
-  string pre_update_hook = 6;
+  string pre_update_hook = 7;
   
   // Optional: Post-update hook command
-  string post_update_hook = 7;
+  string post_update_hook = 8;
 }
 
 message ScheduleUpdateResponse {
@@ -108,4 +120,46 @@ message CancelScheduledUpdateRequest {
 message CancelScheduledUpdateResponse {
   bool success = 1;
   string message = 2;
+}
+
+// Health check messages
+
+message GetHealthRequest {}
+
+message GetHealthResponse {
+  string status = 1; // "healthy", "degraded", "unhealthy"
+  repeated HealthCheckResult checks = 2;
+  string last_update_time = 3;
+}
+
+message HealthCheckResult {
+  string name = 1;
+  string status = 2; // "pass", "fail", "unknown"
+  string message = 3;
+  uint64 duration_ms = 4;
+}
+
+// Rollback messages
+
+message TriggerRollbackRequest {
+  string reason = 1;
+}
+
+message TriggerRollbackResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetRollbackHistoryRequest {}
+
+message GetRollbackHistoryResponse {
+  repeated RollbackEvent events = 1;
+}
+
+message RollbackEvent {
+  string timestamp = 1;
+  string reason = 2;
+  string from_partition = 3;
+  string to_partition = 4;
+  bool automatic = 5;
 }

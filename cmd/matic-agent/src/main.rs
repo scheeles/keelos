@@ -29,6 +29,8 @@ mod disk;
 mod health;
 mod telemetry;
 mod update_scheduler;
+mod health_check;
+
 
 use update_scheduler::{UpdateScheduler, ScheduleStatus};
 

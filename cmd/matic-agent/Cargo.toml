@@ -36,10 +36,5 @@ opentelemetry-prometheus = "0.14"
 tracing-opentelemetry = "0.22"
 prometheus = "0.14"
 sysinfo = "0.30"
-
-# HTTP server for health/metrics endpoints
-axum = "0.7"
-tower = "0.4"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+async-trait = "0.1"
 

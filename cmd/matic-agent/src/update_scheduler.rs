@@ -27,6 +27,9 @@ pub struct UpdateSchedule {
     pub enable_auto_rollback: bool,
     pub pre_update_hook: Option<String>,
     pub post_update_hook: Option<String>,
+    pub health_check_timeout_secs: Option<u32>,
+    pub rollback_triggered: bool,
+    pub rollback_reason: Option<String>,
     pub status: ScheduleStatus,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -41,6 +44,7 @@ pub enum ScheduleStatus {
     Completed,
     Failed,
     Cancelled,
+    RolledBack,
 }
 
 impl ToString for ScheduleStatus {
@@ -51,6 +55,7 @@ impl ToString for ScheduleStatus {
             ScheduleStatus::Completed => "completed".to_string(),
             ScheduleStatus::Failed => "failed".to_string(),
             ScheduleStatus::Cancelled => "cancelled".to_string(),
+            ScheduleStatus::RolledBack => "rolled_back".to_string(),
         }
     }
 }
@@ -81,6 +86,7 @@ impl UpdateScheduler {
         scheduled_at: Option<DateTime<Utc>>,
         maintenance_window_secs: Option<u32>,
         enable_auto_rollback: bool,
+        health_check_timeout_secs: Option<u32>,
         pre_update_hook: Option<String>,
         post_update_hook: Option<String>,
     ) -> Result<UpdateSchedule, String> {
@@ -91,6 +97,9 @@ impl UpdateScheduler {
             scheduled_at,
             maintenance_window_secs,
             enable_auto_rollback,
+            health_check_timeout_secs,
+            rollback_triggered: false,
+            rollback_reason: None,
             pre_update_hook,
             post_update_hook,
             status: ScheduleStatus::Pending,
@@ -195,6 +204,31 @@ impl UpdateScheduler {
             .cloned()
             .collect()
     }
+
+    /// Trigger rollback for a schedule
+    pub async fn trigger_rollback(
+        &self,
+        id: &str,
+        reason: impl Into<String>,
+    ) -> Result<(), String> {
+        let reason = reason.into();
+        let mut schedules = self.schedules.write().await;
+
+        if let Some(schedule) = schedules.get_mut(id) {
+            schedule.rollback_triggered = true;
+            schedule.rollback_reason = Some(reason.clone());
+            schedule.status = ScheduleStatus::RolledBack;
+            schedule.completed_at = Some(Utc::now());
+
+            info!(schedule_id = %id, reason = %reason, "Triggered rollback for schedule");
+            drop(schedules);
+            self.persist_schedules().await?;
+            Ok(())
+        } else {
+            Err(format!("Schedule not found: {}", id))
+        }
+    }
+
 
     /// Persist schedules to disk
     async fn persist_schedules(&self) -> Result<(), String> {

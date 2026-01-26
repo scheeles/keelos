@@ -13,6 +13,8 @@ use std::process::Command;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, warn};
+use chrono::Utc;
+
 
 /// Information about a partition
 pub struct PartitionInfo {
@@ -302,6 +304,122 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
 
     Ok(())
 }
+
+/// State file for tracking rollback information
+const ROLLBACK_STATE_FILE: &str = "/var/lib/matic/rollback_state.json";
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct RollbackState {
+    previous_partition: Option<u32>,
+    boot_counter: u32,
+    last_update_time: Option<String>,
+}
+
+impl Default for RollbackState {
+    fn default() -> Self {
+        Self {
+            previous_partition: None,
+            boot_counter: 0,
+            last_update_time: None,
+        }
+    }
+}
+
+/// Load rollback state from disk
+fn load_rollback_state() -> RollbackState {
+    match fs::read_to_string(ROLLBACK_STATE_FILE) {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(_) => RollbackState::default(),
+    }
+}
+
+/// Save rollback state to disk
+fn save_rollback_state(state: &RollbackState) -> io::Result<()> {
+    // Ensure parent directory exists
+    if let Some(parent) = std::path::Path::new(ROLLBACK_STATE_FILE).parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let json = serde_json::to_string_pretty(state)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    
+    fs::write(ROLLBACK_STATE_FILE, json)?;
+    debug!("Saved rollback state");
+    Ok(())
+}
+
+/// Track the current active partition before switching (for rollback)
+pub fn record_active_partition_for_rollback() -> io::Result<()> {
+    let active = get_active_partition()?;
+    let mut state = load_rollback_state();
+    state.previous_partition = Some(active.index);
+    state.last_update_time = Some(chrono::Utc::now().to_rfc3339());
+    save_rollback_state(&state)?;
+    info!(previous_partition = active.index, "Recorded partition for rollback");
+    Ok(())
+}
+
+/// Rollback to the previous partition
+pub fn rollback_to_previous_partition() -> io::Result<()> {
+    let state = load_rollback_state();
+    
+    let previous_index = state.previous_partition.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "No previous partition recorded for rollback",
+        )
+    })?;
+
+    info!(target_partition = previous_index, "Rolling back to previous partition");
+    
+    // Switch back to the previous partition
+    switch_boot_partition(previous_index)?;
+    
+    // Clear the rollback state
+    let mut state = load_rollback_state();
+    state.previous_partition = None;
+    state.boot_counter = 0;
+    save_rollback_state(&state)?;
+
+    Ok(())
+}
+
+/// Get the current boot counter
+pub fn get_boot_counter() -> u32 {
+    load_rollback_state().boot_counter
+}
+
+/// Increment the boot counter (called on each boot)
+pub fn increment_boot_counter() -> io::Result<()> {
+    let mut state = load_rollback_state();
+    state.boot_counter += 1;
+    save_rollback_state(&state)?;
+    info!(boot_counter = state.boot_counter, "Incremented boot counter");
+    Ok(())
+}
+
+/// Clear the boot counter after successful boot + health checks
+pub fn clear_boot_counter() -> io::Result<()> {
+    let mut state = load_rollback_state();
+    state.boot_counter = 0;
+    save_rollback_state(&state)?;
+    info!("Cleared boot counter");
+    Ok(())
+}
+
+/// Check if we're in a boot loop (too many failed boots)
+pub fn is_boot_loop() -> bool {
+    const MAX_BOOT_ATTEMPTS: u32 = 3;
+    let counter = get_boot_counter();
+    if counter >= MAX_BOOT_ATTEMPTS {
+        warn!(boot_counter = counter, max_attempts = MAX_BOOT_ATTEMPTS, "Boot loop detected");
+        true
+    } else {
+        false
+    }
+}
+
+
 
 #[cfg(test)]
 mod tests {
