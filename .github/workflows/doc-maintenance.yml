@@ -1,0 +1,62 @@
+name: Documentation Maintenance
+
+on:
+  schedule:
+    # Run every Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual triggers
+
+jobs:
+  review-docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Review documentation with Claude
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --model claude-opus-4-1-20250805
+            --max-turns 15
+            --system-prompt "You are conducting a weekly documentation maintenance review for MaticOS.
+            
+            Your task is to:
+            1. Review the entire codebase to understand current functionality
+            2. Review all documentation in /docs directory and component READMEs
+            3. Identify gaps, outdated information, or areas needing clarification
+            4. Look for new features or changes that aren't documented
+            5. Ensure consistency across all documentation files
+            
+            Focus on:
+            - Architecture accuracy - Does /docs/architecture.md reflect current design?
+            - API completeness - Are all osctl commands documented in /docs/using-osctl.md?
+            - Getting started guide - Is the build process up-to-date in /docs/getting-started.md?
+            - Installation guide - Are all installation methods current in /docs/installation.md?
+            - README clarity - Does the main README.md accurately introduce the project?
+            - Component docs - Do individual component READMEs explain their purpose?
+            
+            Guidelines:
+            - Follow the project's CLAUDE.md documentation standards
+            - Keep documentation concise and user-focused
+            - Add examples where helpful
+            - Update outdated information
+            - Fix broken links or references
+            
+            Create a PR titled '[Docs] Weekly maintenance review - $(date +%Y-%m-%d)' with your improvements.
+            If no updates are needed, create an issue summarizing the review status instead."
+
+      - name: Documentation review completed
+        if: success()
+        run: |
+          echo "Documentation maintenance review completed. Check the Actions output for results."

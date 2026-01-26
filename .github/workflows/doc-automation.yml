@@ -1,0 +1,82 @@
+name: Documentation Automation
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+    paths:
+      - 'cmd/**'
+      - 'pkg/**'
+      - 'crates/**'
+      - 'kernel/**'
+      - 'system/**'
+      - 'tools/**'
+  workflow_dispatch:
+
+jobs:
+  update-docs:
+    # Only run on merged PRs, not on bot PRs, and not on doc-update PRs to avoid loops
+    if: |
+      github.event.pull_request.merged == true &&
+      github.actor != 'github-actions[bot]' &&
+      !startsWith(github.event.pull_request.title, '[Docs]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # Need full history to see what changed
+          ref: main
+
+      - name: Get changed files
+        id: changed-files
+        run: |
+          # Get list of changed files from the merged PR
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep -E '\.(rs|go|sh|md)$' || echo "")
+          echo "Changed files: $CHANGED_FILES"
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Update documentation with Claude
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --model claude-opus-4-1-20250805
+            --max-turns 8
+            --system-prompt "You are a documentation expert for MaticOS. A PR has just been merged with the following changes:
+            
+            Changed files:
+            ${{ steps.changed-files.outputs.files }}
+            
+            Your task is to:
+            1. Read and understand the code changes
+            2. Review the existing documentation in /docs directory
+            3. Update relevant documentation files to reflect these changes
+            4. Ensure documentation follows the project's CLAUDE.md guidelines
+            5. Update API references, architecture diagrams, and getting started guides as needed
+            6. Keep documentation concise, accurate, and user-focused
+            
+            Focus areas:
+            - /docs/architecture.md - If system design or boot sequence changed
+            - /docs/using-osctl.md - If osctl commands or APIs changed
+            - /docs/getting-started.md - If build process or setup changed
+            - /docs/installation.md - If installation steps or requirements changed
+            - Component README.md files - For internal implementation details
+            
+            Create a PR titled '[Docs] Auto-update from PR #${{ github.event.pull_request.number }}' with your changes.
+            Include a summary of what documentation was updated and why."
+
+      - name: Create documentation PR
+        if: success()
+        run: |
+          echo "Documentation update completed. Check the Actions output for the PR link."
