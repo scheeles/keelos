@@ -5,17 +5,21 @@
 //! - It must NEVER panic or exit unexpectedly
 //! - It must reap zombie processes
 //! - It must supervise critical system services
+//! - It tracks boot phase metrics for observability
 //!
 //! All errors are handled gracefully - the system will continue running
 //! in a degraded/maintenance mode rather than crashing.
 
 use nix::mount::{mount, MsFlags};
+use nix::sys::stat::{umask, Mode};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
 use std::process::{Child, Command, Stdio};
 use std::{fs, thread, time};
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
+
+mod telemetry;
 
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
 fn main() {
@@ -44,20 +48,36 @@ fn main() {
 
 /// Main init logic - all errors are propagated but never cause a panic
 fn run() -> Result<(), InitError> {
-    // Phase 1: Mount essential filesystems
+    // Set safe umask
+    umask(Mode::from_bits(0o077).unwrap());
+
+    // Initialize boot phase tracker
+    let mut boot_tracker = telemetry::BootPhaseTracker::new();
+
+    // Mount essential filesystems
+    boot_tracker.start_phase("filesystem");
     setup_filesystems()?;
 
-    // Phase 2: Setup networking
-    setup_networking();
-
-    // Phase 3: Check for test mode
-    check_test_mode();
-
-    // Phase 4: Setup cgroups
+    // Set up cgroups
+    boot_tracker.start_phase("cgroups");
     setup_cgroups();
 
-    // Phase 5: Start and supervise services
+    // Configure networking
+    boot_tracker.start_phase("network");
+    setup_networking();
+
+    // Check for test mode
+    check_test_mode();
+
+    // Supervise core services
+    boot_tracker.start_phase("services");
     supervise_services()?;
+
+    // Export boot metrics
+    boot_tracker.end_current_phase();
+    if let Err(e) = boot_tracker.export_to_file("/run/matic/boot-metrics.json") {
+        warn!(error = %e, "Failed to export boot metrics");
+    }
 
     Ok(())
 }
