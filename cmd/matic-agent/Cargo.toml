@@ -24,7 +24,7 @@ opentelemetry-otlp = "0.14"
 opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
 opentelemetry-prometheus = "0.14"
 tracing-opentelemetry = "0.22"
-prometheus = "0.13"
+prometheus = "0.14"
 sysinfo = "0.30"
 
 # HTTP server for health/metrics endpoints
