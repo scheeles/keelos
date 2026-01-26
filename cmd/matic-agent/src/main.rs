@@ -181,10 +181,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let health_router = health::create_health_router(health_state);
 
-    let health_addr_clone = health_addr;
     let health_server = tokio::spawn(async move {
-        info!(addr = %health_addr_clone, "Starting health/metrics HTTP server");
-        let listener = tokio::net::TcpListener::bind(&health_addr_clone)
+        info!(addr = %health_addr, "Starting health/metrics HTTP server");
+        let listener = tokio::net::TcpListener::bind(health_addr)
             .await
             .expect("Failed to bind health server");
         axum::serve(listener, health_router)
