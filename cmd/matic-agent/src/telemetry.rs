@@ -9,7 +9,7 @@ use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{runtime, Resource};
 use prometheus::{Encoder, Registry, TextEncoder};
-use sysinfo::{CpuExt, System, SystemExt};
+use sysinfo::System;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 /// Initialize OpenTelemetry with OTLP exporter
@@ -29,31 +29,28 @@ pub fn init_telemetry(
     ]);
 
     // Initialize tracing if OTLP endpoint is provided
-    if let Some(endpoint) = otlp_endpoint {
-        let tracer_provider = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-                    .with_endpoint(endpoint),
-            )
-            .with_trace_config(
-                opentelemetry_sdk::trace::config()
-                    .with_resource(resource.clone()),
-            )
-            .install_batch(runtime::Tokio)?;
-
-        global::set_tracer_provider(tracer_provider);
-    }
-
-    // Create tracing subscriber with OpenTelemetry layer
-    let telemetry_layer = if otlp_endpoint.is_some() {
-        Some(tracing_opentelemetry::layer().with_tracer(
-            global::tracer(service_name),
-        ))
+    let tracer = if let Some(endpoint) = otlp_endpoint {
+        Some(
+            opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_exporter(
+                    opentelemetry_otlp::new_exporter()
+                        .tonic()
+                        .with_endpoint(endpoint),
+                )
+                .with_trace_config(
+                    opentelemetry_sdk::trace::config().with_resource(resource.clone()),
+                )
+                .install_batch(runtime::Tokio)?,
+        )
     } else {
         None
     };
+
+    // Create tracing subscriber with OpenTelemetry layer
+    let telemetry_layer = tracer
+        .as_ref()
+        .map(|t| tracing_opentelemetry::layer().with_tracer(t.clone()));
 
     // Set up structured logging with optional OpenTelemetry
     let env_filter = EnvFilter::try_from_default_env()
