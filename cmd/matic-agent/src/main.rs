@@ -20,7 +20,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, warn};
 
 mod disk;
 mod health;

@@ -7,7 +7,7 @@
 
 use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{metrics::MeterProvider, runtime, Resource};
+use opentelemetry_sdk::{runtime, Resource};
 use prometheus::{Encoder, Registry, TextEncoder};
 use sysinfo::{CpuExt, System, SystemExt};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -30,7 +30,7 @@ pub fn init_telemetry(
 
     // Initialize tracing if OTLP endpoint is provided
     if let Some(endpoint) = otlp_endpoint {
-        let tracer = opentelemetry_otlp::new_pipeline()
+        let tracer_provider = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_exporter(
                 opentelemetry_otlp::new_exporter()
@@ -43,7 +43,7 @@ pub fn init_telemetry(
             )
             .install_batch(runtime::Tokio)?;
 
-        global::set_tracer_provider(tracer);
+        global::set_tracer_provider(tracer_provider);
     }
 
     // Create tracing subscriber with OpenTelemetry layer
