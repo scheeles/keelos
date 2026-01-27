@@ -304,6 +304,30 @@ fn reap_zombies() {
     }
 }
 
+/// Spawn kubelet with appropriate configuration
+/// Checks for kubeconfig and adds --kubeconfig argument if available
+fn spawn_kubelet() -> Option<Child> {
+    let kubelet_path = if std::path::Path::new("/var/lib/keel/bin/kubelet").exists() {
+        info!("Using override kubelet from /var/lib/keel/bin/kubelet");
+        "/var/lib/keel/bin/kubelet"
+    } else {
+        "/usr/bin/kubelet"
+    };
+
+    // Check if kubeconfig exists (set during bootstrap)
+    let kubeconfig_path = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+    let mut args = vec!["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"];
+
+    if std::path::Path::new(kubeconfig_path).exists() {
+        info!(path = kubeconfig_path, "Using kubeconfig for kubelet");
+        args.push("--kubeconfig=/var/lib/keel/kubernetes/kubelet.kubeconfig");
+    } else {
+        debug!("No kubeconfig found - kubelet will run in standalone mode");
+    }
+
+    spawn_service("kubelet", kubelet_path, &args)
+}
+
 /// Main supervision loop for system services
 fn supervise_services() -> Result<(), InitError> {
     // Start containerd
@@ -314,19 +338,9 @@ fn supervise_services() -> Result<(), InitError> {
     info!("Starting keel-agent");
     let mut agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
 
-    // Start kubelet (with override support)
+    // Start kubelet (with override support and kubeconfig)
     info!("Starting kubelet");
-    let kubelet_path = if std::path::Path::new("/var/lib/keel/bin/kubelet").exists() {
-        info!("Using override kubelet from /var/lib/keel/bin/kubelet");
-        "/var/lib/keel/bin/kubelet"
-    } else {
-        "/usr/bin/kubelet"
-    };
-    let mut kubelet = spawn_service(
-        "kubelet",
-        kubelet_path,
-        &["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"],
-    );
+    let mut kubelet = spawn_kubelet();
 
     // Track restart counts for backoff
     let mut agent_restart_count: u32 = 0;
@@ -375,6 +389,21 @@ fn supervise_services() -> Result<(), InitError> {
                 warn!(service = "kubelet", exit_status = %status, "Kubelet exited - node in maintenance mode");
                 kubelet = None; // Don't restart automatically
             }
+        }
+
+        // Check for kubelet restart signal (from bootstrap)
+        if Path::new("/run/keel/restart-kubelet").exists() {
+            info!("Kubelet restart signal detected");
+            // Kill existing kubelet if running
+            if let Some(mut child) = kubelet {
+                info!("Stopping kubelet for restart");
+                let _ = child.kill();
+                let _ = child.wait(); // Clean up zombie
+            }
+            // Remove signal file
+            let _ = fs::remove_file("/run/keel/restart-kubelet");
+            // Restart kubelet with new configuration
+            kubelet = spawn_kubelet();
         }
 
         thread::sleep(time::Duration::from_secs(5));
