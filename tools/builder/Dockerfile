@@ -26,8 +26,6 @@ RUN apt-get update && apt-get install -y \
     fdisk \
     qemu-utils \
     xorriso \
-    qemu-utils \
-    xorriso \
     mtools \
     cmake \
     clang \
