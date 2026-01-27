@@ -24,18 +24,51 @@ The Linux kernel initializes hardware, mounts the `initramfs`, and executes the 
     *   Starts `keel-agent` to listen for API commands.
     *   Starts `kubelet` to join the Kubernetes cluster.
 
-## Node Identity
+## Node Identity & Bootstrap Certificates
 
-On first boot, the node generates a unique Machine ID and a self-signed certificate (unless bootstrapped with a specific identity).
+On first boot, `keel-init` automatically generates **bootstrap certificates** for initial node management:
 
-### Registration
-In a managed cluster, the `keel-agent` will reach out to the control plane to register itself and download the cluster Certificate Authority (CA). This process is known as **bootstrapping**.
+- **Bootstrap CA**: Self-signed certificate authority (24-hour validity)
+- **Initial Client Certificate**: For administrative access before Kubernetes join
+- **Storage**: Certificates stored in `/etc/keel/crypto/`
 
-Once bootstrapped, the node will only accept API commands signed by the Cluster CA, ensuring that unauthorized users cannot take control of the machine.
+These bootstrap certificates display setup instructions on the console:
+
+```
+╔══════════════════════════════════════════════════════════╗
+║        KeelOS Node - Bootstrap Required                 ║
+╚══════════════════════════════════════════════════════════╝
+
+🔐 To manage this node, first retrieve bootstrap certificates:
+
+   osctl init --bootstrap --node <this-node-ip>
+
+⏰ Bootstrap certificates expire in 24 hours
+   Complete setup before expiry!
+```
+
+### Getting Bootstrap Certificates
+
+From your admin machine, retrieve the bootstrap certificates:
+
+```bash
+osctl init --bootstrap --node 192.168.1.100
+```
+
+This command:
+1. Generates an RSA key pair locally (private key never transmitted)
+2. Creates a Certificate Signing Request (CSR)
+3. Sends the CSR to the node over HTTP
+4. Receives the signed certificate from the node's bootstrap CA
+5. Saves certificates to `~/.keel/bootstrap/`
+
+You can now use `osctl` with bootstrap certificates to set up the node.
 
 ## Joining a Kubernetes Cluster
 
 After the node has completed its first boot, you can join it to a Kubernetes cluster using the `osctl bootstrap` command. This configures the kubelet to connect to your cluster's API server.
+
+Once bootstrapped, the node will only accept API commands signed by the Cluster CA, ensuring that unauthorized users cannot take control of the machine.
 
 ### Quick Start
 
@@ -61,3 +94,20 @@ kubectl get nodes
 ```
 
 For detailed instructions, troubleshooting, and alternative authentication methods, see the [Kubernetes Bootstrap Guide](../guides/kubernetes-bootstrap.md).
+
+### What Happens After K8s Join
+
+Once the node joins a Kubernetes cluster:
+- Bootstrap certificates are **automatically deleted** for security
+- `keel-agent` switches to trusting the Kubernetes CA
+- Operational certificates are obtained via `osctl init --kubeconfig`
+
+### Operational Certificates (Post-Join)
+
+After the node joins Kubernetes, get operational certificates:
+
+```bash
+osctl init --kubeconfig ~/.kube/config
+```
+
+This requests certificates from the Kubernetes cluster CA, stored in `~/.keel/`.
