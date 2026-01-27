@@ -47,7 +47,7 @@ menuentry "KeelOS (Debug Mode)" {
 EOF
 
 echo ">>> Building ISO with grub-mkrescue..."
-grub-mkrescue -o "${ISO_OUTPUT}" "${ISO_DIR}" 2>/dev/null
+grub-mkrescue -o "${ISO_OUTPUT}" "${ISO_DIR}"
 
 # Verify the ISO was created
 if [ -f "${ISO_OUTPUT}" ]; then
