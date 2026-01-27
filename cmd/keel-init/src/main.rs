@@ -22,6 +22,7 @@ use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod telemetry;
+mod bootstrap_certs;
 
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
 fn main() {
@@ -67,6 +68,12 @@ fn run() -> Result<(), InitError> {
     // Configure networking
     boot_tracker.start_phase("network");
     setup_networking();
+
+    // Generate bootstrap certificates (first boot)
+    boot_tracker.start_phase("bootstrap_certs");
+    if let Err(e) = bootstrap_certs::generate_bootstrap_certificates() {
+        warn!(error = %e, "Failed to generate bootstrap certificates");
+    }
 
     // Check for test mode
     check_test_mode();
