@@ -106,24 +106,56 @@ fn display_bootstrap_instructions() {
     println!("════════════════════════════════════════════════════════════\n");
 }
 
-/// Cleanup bootstrap certificates after successful Kubernetes join
+/// Clean up bootstrap certificates after Kubernetes bootstrapping
+/// This should be called after the node successfully joins a Kubernetes cluster
 pub fn cleanup_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error>> {
     let cert_dir = Path::new(BOOTSTRAP_CERT_DIR);
     
-    // Check if node has been bootstrapped to K8s
-    if !Path::new("/var/lib/keel/kubernetes/kubelet.kubeconfig").exists() {
-        return Ok(()); // Not bootstrapped yet, keep certs
+    if !cert_dir.exists() {
+        info!("Bootstrap certificate directory does not exist, nothing to clean up");
+        return Ok(());
     }
-    
-    info!("Node bootstrapped to Kubernetes - removing bootstrap certificates");
-    
-    // Remove bootstrap certificates (ignore errors)
-    let _ = fs::remove_file(cert_dir.join(BOOTSTRAP_CA_CERT));
-    let _ = fs::remove_file(cert_dir.join(BOOTSTRAP_CA_KEY));
-    let _ = fs::remove_file(cert_dir.join(BOOTSTRAP_CLIENT_CERT));
-    let _ = fs::remove_file(cert_dir.join(BOOTSTRAP_CLIENT_KEY));
-    let _ = fs::remove_file(cert_dir.join(BOOTSTRAP_TIMESTAMP));
-    
-    info!("Bootstrap certificates removed");
+
+    // Check if Kubernetes has been bootstrapped
+    let kubeconfig_path = Path::new("/var/lib/keel/kubernetes/kubelet.kubeconfig");
+    if !kubeconfig_path.exists() {
+        warn!("Kubernetes not bootstrapped yet, skipping cleanup");
+        return Ok(());
+    }
+
+    info!("Cleaning up bootstrap certificates after Kubernetes join...");
+
+    // Remove all bootstrap certificates
+    let files_to_remove = [
+        BOOTSTRAP_CA_CERT,
+        BOOTSTRAP_CA_KEY,
+        BOOTSTRAP_CLIENT_CERT,
+        BOOTSTRAP_CLIENT_KEY,
+        BOOTSTRAP_TIMESTAMP,
+    ];
+
+    let mut removed_count = 0;
+    for file in &files_to_remove {
+        let file_path = cert_dir.join(file);
+        if file_path.exists() {
+            fs::remove_file(&file_path)?;
+            removed_count += 1;
+            info!("Removed bootstrap file: {}", file);
+        }
+    }
+
+    // Try to remove the directory if empty
+    if let Ok(mut entries) = cert_dir.read_dir() {
+        if entries.next().is_none() {
+            fs::remove_dir(cert_dir)?;
+            info!("Removed empty bootstrap certificate directory");
+        }
+    }
+
+    info!(
+        "Bootstrap certificate cleanup complete ({} files removed)",
+        removed_count
+    );
+
     Ok(())
 }
