@@ -1,33 +1,19 @@
 # Changelog
 
-All notable changes to KeelOS will be documented in this file.
+All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
+## [v0.1.0] - 2026-01-27
 
 ### Added
-- Initial `keel-init` implementation (PID 1 with process supervision).
-- Initial `keel-agent` gRPC server with status and install endpoints.
-- Initial `osctl` CLI client.
-- Docker-based build environment (`tools/builder/`).
-- Kernel build script with minimal x86_64 configuration.
-- Initramfs build script bundling all components.
-- QEMU-based testing harness (`tools/testing/`).
-- A/B partition update mechanism prototype.
+- **Immutable OS Architecture**: Read-only SquashFS root filesystem.
+- **gRPC Management API**: `keel-agent` for secure, API-driven management.
+- **Update System**:
+    - Atomic A/B partition updates.
+    - **Delta Updates**: Binary diff updates using `bsdiff` for bandwidth efficiency.
+    - Automatic rollback on boot failure.
+- **CLI**: `osctl` command-line tool for managing the OS.
+- **Documentation**: Comprehensive guides for architecture, lifecycle management, and installation.
+- **License**: Apache License 2.0.
 
 ### Changed
-- N/A
-
-### Fixed
-- N/A
-
-### Security
-- N/A
-
----
-
-## [0.1.0] - YYYY-MM-DD (Planned)
-
-Initial alpha release.
+- Renamed project from `maticos` to `keelos`.
