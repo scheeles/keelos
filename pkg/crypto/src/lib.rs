@@ -51,8 +51,8 @@ pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
 
-    let cert_pem = cert.cert.pem();
-    let key_pem = cert.key_pair.serialize_pem();
+    let cert_pem = cert.serialize_pem().map_err(|e| CryptoError::Cert(e.to_string()))?;
+    let key_pem = cert.serialize_private_key_pem();
 
     Ok((cert_pem, key_pem))
 }
