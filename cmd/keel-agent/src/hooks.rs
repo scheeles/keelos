@@ -3,7 +3,7 @@
 //! Provides safe execution of pre/post update hooks.
 
 use std::process::Command;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 /// Execute a hook command
 ///
@@ -25,14 +25,16 @@ pub async fn execute_hook(command: &str, phase: &str) -> Result<(), String> {
     let program = parts[0];
     let args = &parts[1..];
 
-    let result = Command::new(program)
-        .args(args)
-        .status();
+    let result = Command::new(program).args(args).status();
 
     match result {
         Ok(status) => {
             if status.success() {
-                info!(phase = phase, command = command, "Hook executed successfully");
+                info!(
+                    phase = phase,
+                    command = command,
+                    "Hook executed successfully"
+                );
                 Ok(())
             } else {
                 let msg = format!("Hook failed with exit code: {:?}", status.code());
