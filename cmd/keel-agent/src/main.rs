@@ -13,9 +13,10 @@
 
 use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
-    CancelScheduledUpdateRequest, CancelScheduledUpdateResponse, GetHealthRequest,
-    GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse, GetStatusRequest,
-    GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
+    BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
+    CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
+    GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
+    GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
     RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
     TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
@@ -403,6 +404,161 @@ impl NodeService for HelperNodeService {
 
         Ok(Response::new(GetRollbackHistoryResponse {
             events: rollback_events,
+        }))
+    }
+
+    async fn bootstrap_kubernetes(
+        &self,
+        request: Request<BootstrapKubernetesRequest>,
+    ) -> Result<Response<BootstrapKubernetesResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            api_server = %req.api_server_endpoint,
+            has_token = !req.bootstrap_token.is_empty(),
+            has_kubeconfig = !req.kubeconfig.is_empty(),
+            "Bootstrap Kubernetes request received"
+        );
+
+        // Validate inputs
+        if req.api_server_endpoint.is_empty() {
+            return Err(Status::invalid_argument("api_server_endpoint is required"));
+        }
+
+        // Must provide either token+CA or kubeconfig
+        if req.bootstrap_token.is_empty() && req.kubeconfig.is_empty() {
+            return Err(Status::invalid_argument(
+                "Either bootstrap_token or kubeconfig must be provided",
+            ));
+        }
+
+        // If using token auth, CA cert is required
+        if !req.bootstrap_token.is_empty() && req.ca_cert_pem.is_empty() {
+            return Err(Status::invalid_argument(
+                "ca_cert_pem is required when using bootstrap_token",
+            ));
+        }
+
+        // Determine node name
+        let node_name = if !req.node_name.is_empty() {
+            req.node_name.clone()
+        } else {
+            // Use hostname
+            hostname::get()
+                .map_err(|e| Status::internal(format!("Failed to get hostname: {}", e)))?
+                .to_string_lossy()
+                .to_string()
+        };
+
+        // Prepare Kubernetes directory
+        let base_path = "/var/lib/keel";
+        keel_config::bootstrap::prepare_k8s_directories(base_path)
+            .map_err(|e| Status::internal(format!("Failed to create directories: {}", e)))?;
+
+        let k8s_dir = format!("{}/kubernetes", base_path);
+        let ca_cert_path = format!("{}/ca.crt", k8s_dir);
+        let kubeconfig_path = format!("{}/kubelet.kubeconfig", k8s_dir);
+
+        // Write CA certificate
+        if !req.ca_cert_pem.is_empty() {
+            std::fs::write(&ca_cert_path, &req.ca_cert_pem).map_err(|e| {
+                Status::internal(format!("Failed to write CA certificate: {}", e))
+            })?;
+            info!(path = %ca_cert_path, "CA certificate written");
+        }
+
+        // Generate or write kubeconfig
+        let kubeconfig_content = if !req.kubeconfig.is_empty() {
+            // Use provided kubeconfig
+            String::from_utf8(req.kubeconfig).map_err(|e| {
+                Status::invalid_argument(format!("Invalid kubeconfig encoding: {}", e))
+            })?
+        } else {
+            // Generate kubeconfig from token
+            keel_config::bootstrap::generate_kubeconfig(
+                &req.api_server_endpoint,
+                &req.ca_cert_pem,
+                &req.bootstrap_token,
+                &node_name,
+            )
+            .map_err(|e| Status::internal(format!("Failed to generate kubeconfig: {}", e)))?
+        };
+
+        // Write kubeconfig
+        std::fs::write(&kubeconfig_path, &kubeconfig_content).map_err(|e| {
+            Status::internal(format!("Failed to write kubeconfig: {}", e))
+        })?;
+        info!(path = %kubeconfig_path, "Kubeconfig written");
+
+        // Persist bootstrap configuration
+        let bootstrap_config = keel_config::bootstrap::BootstrapConfig::new(
+            req.api_server_endpoint.clone(),
+            node_name.clone(),
+            kubeconfig_path.clone(),
+            ca_cert_path.clone(),
+        );
+
+        let bootstrap_state_path = format!("{}/bootstrap.json", k8s_dir);
+        bootstrap_config.save(&bootstrap_state_path).map_err(|e| {
+            Status::internal(format!("Failed to save bootstrap state: {}", e))
+        })?;
+
+        // Signal kubelet restart
+        let restart_signal_path = "/run/keel/restart-kubelet";
+        std::fs::create_dir_all("/run/keel").ok();
+        std::fs::write(restart_signal_path, "1").map_err(|e| {
+            Status::internal(format!("Failed to create restart signal: {}", e))
+        })?;
+
+        info!(
+            node_name = %node_name,
+            api_server = %req.api_server_endpoint,
+            "Kubernetes bootstrap completed"
+        );
+
+        Ok(Response::new(BootstrapKubernetesResponse {
+            success: true,
+            message: format!(
+                "Bootstrap successful. Node '{}' configured to join cluster. Kubelet will restart.",
+                node_name
+            ),
+            kubeconfig_path,
+        }))
+    }
+
+    async fn get_bootstrap_status(
+        &self,
+        _request: Request<GetBootstrapStatusRequest>,
+    ) -> Result<Response<GetBootstrapStatusResponse>, Status> {
+        debug!("Get bootstrap status requested");
+
+        let base_path = "/var/lib/keel";
+        let k8s_dir = format!("{}/kubernetes", base_path);
+        let bootstrap_state_path = format!("{}/bootstrap.json", k8s_dir);
+
+        // Check if bootstrapped
+        if !keel_config::bootstrap::BootstrapConfig::is_bootstrapped(&bootstrap_state_path) {
+            return Ok(Response::new(GetBootstrapStatusResponse {
+                is_bootstrapped: false,
+                api_server_endpoint: String::new(),
+                node_name: String::new(),
+                kubeconfig_path: String::new(),
+                bootstrapped_at: String::new(),
+            }));
+        }
+
+        // Load bootstrap configuration
+        let config = keel_config::bootstrap::BootstrapConfig::load(&bootstrap_state_path)
+            .map_err(|e| {
+                Status::internal(format!("Failed to load bootstrap configuration: {}", e))
+            })?;
+
+        Ok(Response::new(GetBootstrapStatusResponse {
+            is_bootstrapped: true,
+            api_server_endpoint: config.api_server,
+            node_name: config.node_name,
+            kubeconfig_path: config.kubeconfig_path,
+            bootstrapped_at: config.bootstrapped_at,
         }))
     }
 }
