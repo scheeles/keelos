@@ -497,8 +497,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start rollback supervisor
     let rb_health = health_checker.clone();
+    let rb_scheduler = scheduler.clone();
     tokio::spawn(async move {
-        start_rollback_supervisor(rb_health).await;
+        start_rollback_supervisor(rb_health, rb_scheduler).await;
     });
 
     // Start gRPC server
@@ -615,15 +616,12 @@ async fn execute_scheduled_update(
 }
 
 /// Rollback supervisor checks health after boot and triggers rollback if critical
-async fn start_rollback_supervisor(health: Arc<HealthChecker>) {
+async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<UpdateScheduler>) {
     use tokio::time::{sleep, Duration};
 
     // Allow system to stabilize (initial grace period)
     info!("Rollback supervisor started - waiting for system stability (60s)");
     sleep(Duration::from_secs(60)).await;
-
-    // TODO: optimization: Check if this is a fresh boot after update
-    // For now, checks run periodically and protect against degradation
 
     // Run critical check
     let (status, _) = health.run_all_checks().await;
@@ -631,7 +629,18 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>) {
     if status == health_check::HealthStatus::Unhealthy {
         error!(status = %status, "Critical health failure detected!");
 
+        // Try to identify if there was a recent update to mark as failed/rolledback
+        // In a real scenario, we'd query the scheduler for the last "Completed" update that might be the cause
+        // For now, we'll log it at the system level.
+        
         warn!("Initiating AUTOMATIC ROLLBACK due to critical health failure");
+        
+        // Attempt to persist rollback state (best effort before reboot)
+        // Note: This relies on storage being writable and shared across boots if we want to see it after rollback
+        if let Err(e) = scheduler.register_rollback("Critical health failure at boot").await {
+             error!(error = %e, "Failed to persist rollback event");
+        }
+
         match disk::rollback_to_previous_partition() {
             Ok(_) => {
                 error!("Rollback successful - rebooting system...");
