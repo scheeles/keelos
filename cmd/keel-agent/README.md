@@ -1,6 +1,6 @@
-# matic-agent
+# keel-agent
 
-The API endpoint for MaticOS node management.
+The API endpoint for KeelOS node management.
 
 **Status**: Alpha
 **Language**: Rust
@@ -8,7 +8,7 @@ The API endpoint for MaticOS node management.
 
 ## Overview
 
-`matic-agent` runs as a daemon (supervised by `matic-init`) and exposes a gRPC interface. Since MaticOS has no SSH or shell, this agent is the *only* way to mutate the system state or retrieve debug information remotely.
+`keel-agent` runs as a daemon (supervised by `keel-init`) and exposes a gRPC interface. Since KeelOS has no SSH or shell, this agent is the *only* way to mutate the system state or retrieve debug information remotely.
 
 ## Features
 
@@ -23,10 +23,10 @@ The Protocol Buffer definitions are located in `crates/matic-proto`.
 
 ## Usage
 
-Started automatically by `matic-init`.
+Started automatically by `keel-init`.
 Listens on `0.0.0.0:50051`.
 
 Debug locally (if built natively):
 ```bash
-cargo run --package matic-agent
+cargo run --package keel-agent
 ```

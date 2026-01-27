@@ -1,6 +1,6 @@
-# MaticOS Architecture
+# KeelOS Architecture
 
-This document provides a high-level overview of the MaticOS architecture.
+This document provides a high-level overview of the KeelOS architecture.
 
 ## Design Principles
 
@@ -15,34 +15,34 @@ This document provides a high-level overview of the MaticOS architecture.
 sequenceDiagram
     participant BIOS/UEFI
     participant Kernel
-    participant matic-init
+    participant keel-init
     participant containerd
     participant kubelet
-    participant matic-agent
+    participant keel-agent
 
     BIOS/UEFI->>Kernel: Load bzImage + initramfs
-    Kernel->>matic-init: Execute /init (PID 1)
-    matic-init->>matic-init: Mount /proc, /sys, /dev
-    matic-init->>matic-init: Mount persistent storage
-    matic-init->>containerd: Start containerd
-    matic-init->>kubelet: Start kubelet
-    matic-init->>matic-agent: Start gRPC agent
-    matic-agent-->>matic-agent: Listen on :50051
+    Kernel->>keel-init: Execute /init (PID 1)
+    keel-init->>keel-init: Mount /proc, /sys, /dev
+    keel-init->>keel-init: Mount persistent storage
+    keel-init->>containerd: Start containerd
+    keel-init->>kubelet: Start kubelet
+    keel-init->>keel-agent: Start gRPC agent
+    keel-agent-->>keel-agent: Listen on :50051
 ```
 
 ## Component Responsibilities
 
 | Component       | Role                                      |
 |-----------------|-------------------------------------------|
-| `matic-init`    | PID 1. Mounts filesystems, supervises processes, reaps zombies. |
-| `matic-agent`   | gRPC server. Handles updates, reboots, configuration. |
-| `osctl`         | CLI client for `matic-agent`. |
+| `keel-init`    | PID 1. Mounts filesystems, supervises processes, reaps zombies. |
+| `keel-agent`   | gRPC server. Handles updates, reboots, configuration. |
+| `osctl`         | CLI client for `keel-agent`. |
 | `containerd`    | Container runtime (stock, unmodified). |
 | `kubelet`       | Kubernetes node agent (stock, unmodified). |
 
 ## Partition Layout
 
-MaticOS uses a GPT partition table with the following layout:
+KeelOS uses a GPT partition table with the following layout:
 
 | Partition | Label         | Purpose                        |
 |-----------|---------------|--------------------------------|

@@ -1,22 +1,22 @@
-# Getting Started with MaticOS
+# Getting Started with KeelOS
 
-This guide walks you through getting MaticOS running locally.
+This guide walks you through getting KeelOS running locally.
 
 ## Quick Start
 
 **Option 1: Download Pre-built Image** (Recommended)
 
-Download the latest ISO from [GitHub Releases](https://github.com/scheeles/maticos/releases) and boot it:
+Download the latest ISO from [GitHub Releases](https://github.com/scheeles/keelos/releases) and boot it:
 
 ```bash
-qemu-system-x86_64 -cdrom maticos-0.1.0.iso -m 2G -serial stdio
+qemu-system-x86_64 -cdrom keelos-0.1.0.iso -m 2G -serial stdio
 ```
 
 For full installation options (VMs, PXE, etc.), see [Installation Guide](./installation.md).
 
 **Option 2: Build from Source**
 
-Continue reading below to build MaticOS from source.
+Continue reading below to build KeelOS from source.
 
 ---
 
@@ -29,8 +29,8 @@ Continue reading below to build MaticOS from source.
 ## Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/scheeles/maticos.git
-cd maticos
+git clone https://github.com/scheeles/keelos.git
+cd keelos
 ```
 
 ## Step 2: Enter the Build Environment
@@ -42,7 +42,7 @@ The build environment is a Docker container with all necessary toolchains pre-in
 ```
 
 This will:
-1.  Build the `maticos-builder` Docker image (first run only).
+1.  Build the `keelos-builder` Docker image (first run only).
 2.  Drop you into an interactive shell inside the container.
 
 ## Step 3: Build the Kernel
@@ -53,7 +53,7 @@ Inside the container, run:
 ./tools/builder/kernel-build.sh
 ```
 
-This downloads the Linux kernel source, applies MaticOS-specific configuration, and compiles `bzImage`.
+This downloads the Linux kernel source, applies KeelOS-specific configuration, and compiles `bzImage`.
 
 **Output**: `build/kernel/bzImage`
 
@@ -65,7 +65,7 @@ Still inside the container:
 cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-This compiles `matic-init`, `matic-agent`, and `osctl`.
+This compiles `keel-init`, `keel-agent`, and `osctl`.
 
 ## Step 5: Build the Initramfs
 
@@ -93,9 +93,9 @@ Exit the Docker container (type `exit`) and run on your host:
 ./tools/testing/run-qemu.sh
 ```
 
-You should see the MaticOS boot sequence. The system will initialize and start `matic-agent`.
+You should see the KeelOS boot sequence. The system will initialize and start `keel-agent`.
 
 ## Next Steps
 
-*   [Using osctl](./using-osctl.md) - Learn how to interact with a running MaticOS node.
-*   [Architecture Overview](./architecture.md) - Understand how MaticOS is designed.
+*   [Using osctl](./using-osctl.md) - Learn how to interact with a running KeelOS node.
+*   [Architecture Overview](./architecture.md) - Understand how KeelOS is designed.

@@ -1,14 +1,14 @@
-# Claude Code Guidelines for MaticOS
+# Claude Code Guidelines for KeelOS
 
-This document provides project-specific guidance for Claude Code when working on MaticOS documentation and code.
+This document provides project-specific guidance for Claude Code when working on KeelOS documentation and code.
 
 ## Project Overview
 
-MaticOS is an **immutable, API-driven Linux distribution** designed exclusively for Kubernetes nodes. It eliminates traditional userspace components in favor of a minimal, secure architecture.
+KeelOS is an **immutable, API-driven Linux distribution** designed exclusively for Kubernetes nodes. It eliminates traditional userspace components in favor of a minimal, secure architecture.
 
 ### Key Concepts
 
-- **PID 1**: `matic-init` - Custom init system (never use systemd terminology)
+- **PID 1**: `keel-init` - Custom init system (never use systemd terminology)
 - **API-Driven**: All management via gRPC, no SSH/shell access
 - **Immutable**: Root filesystem is read-only SquashFS
 - **A/B Updates**: Atomic partition swapping for updates
@@ -25,11 +25,11 @@ All user-facing documentation lives in `/docs`:
 - `installation.md` - Installing from pre-built images
 - `using-osctl.md` - Remote administration CLI reference
 
-Component-specific documentation lives in component `README.md` files (e.g., `/cmd/matic-init/README.md`).
+Component-specific documentation lives in component `README.md` files (e.g., `/cmd/keel-init/README.md`).
 
 ### Writing Style
 
-1. **Be Concise**: MaticOS users are system engineers, not beginners
+1. **Be Concise**: KeelOS users are system engineers, not beginners
 2. **Use Code Examples**: Show actual commands and output
 3. **Explain "Why"**: Document design decisions, not just "what"
 4. **Security First**: Always mention security implications
@@ -37,12 +37,12 @@ Component-specific documentation lives in component `README.md` files (e.g., `/c
 
 ### Terminology
 
-Use MaticOS-specific terms consistently:
+Use KeelOS-specific terms consistently:
 
 | ✅ Correct | ❌ Avoid |
 |-----------|---------|
-| `matic-init` (PID 1) | init system, systemd |
-| `matic-agent` (management API) | daemon, service |
+| `keel-init` (PID 1) | init system, systemd |
+| `keel-agent` (management API) | daemon, service |
 | `osctl` (admin CLI) | SSH, remote shell |
 | SquashFS root | root partition, / |
 | A/B partitions | dual boot, backup |
@@ -68,8 +68,8 @@ When updating `architecture.md`, use Mermaid diagrams for clarity:
 
 ```mermaid
 graph TD
-    A[Kernel] --> B[matic-init PID 1]
-    B --> C[matic-agent]
+    A[Kernel] --> B[keel-init PID 1]
+    B --> C[keel-agent]
     B --> D[containerd]
     D --> E[kubelet]
 ```
@@ -78,7 +78,7 @@ graph TD
 
 When reviewing code, check for:
 
-1. **Safety in PID 1**: `matic-init` code MUST use `Result<T,E>`, never `panic!`, `unwrap()`, or `expect()`
+1. **Safety in PID 1**: `keel-init` code MUST use `Result<T,E>`, never `panic!`, `unwrap()`, or `expect()`
 2. **Static Linking**: All binaries must be statically linked with musl
 3. **Test Coverage**: New code requires unit tests
 4. **Build in Container**: All builds must run in Docker/Podman
@@ -103,7 +103,7 @@ See `.ai-context/STYLE_GUIDE.md` for full development guidelines (if it exists).
 
 ### API Documentation Format
 
-For `matic-agent` gRPC APIs:
+For `keel-agent` gRPC APIs:
 
 ```markdown
 ### UpdateOS
@@ -120,19 +120,19 @@ Updates the OS to a new version via A/B partition swap.
 
 **Example (osctl):**
 ```bash
-osctl update --image https://releases.maticos.dev/v1.2.3.img \
+osctl update --image https://releases.keelos.dev/v1.2.3.img \
              --checksum abc123...
 ```
 
 ## Example Documentation
 
-Here's an example of good MaticOS documentation style:
+Here's an example of good KeelOS documentation style:
 
 ---
 
 ### Building the Kernel
 
-MaticOS uses a minimalist kernel configuration optimized for container workloads.
+KeelOS uses a minimalist kernel configuration optimized for container workloads.
 
 **Prerequisites:**
 - Docker or Podman
@@ -175,4 +175,4 @@ If you encounter ambiguity:
 3. Default to security and simplicity
 4. When in doubt, ask for clarification in the PR
 
-Remember: MaticOS is opinionated software. Documentation should reflect that confidence while remaining helpful.
+Remember: KeelOS is opinionated software. Documentation should reflect that confidence while remaining helpful.
