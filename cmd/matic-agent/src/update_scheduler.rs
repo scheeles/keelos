@@ -47,15 +47,15 @@ pub enum ScheduleStatus {
     RolledBack,
 }
 
-impl ToString for ScheduleStatus {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ScheduleStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ScheduleStatus::Pending => "pending".to_string(),
-            ScheduleStatus::Running => "running".to_string(),
-            ScheduleStatus::Completed => "completed".to_string(),
-            ScheduleStatus::Failed => "failed".to_string(),
-            ScheduleStatus::Cancelled => "cancelled".to_string(),
-            ScheduleStatus::RolledBack => "rolled_back".to_string(),
+            ScheduleStatus::Pending => write!(f, "pending"),
+            ScheduleStatus::Running => write!(f, "running"),
+            ScheduleStatus::Completed => write!(f, "completed"),
+            ScheduleStatus::Failed => write!(f, "failed"),
+            ScheduleStatus::Cancelled => write!(f, "cancelled"),
+            ScheduleStatus::RolledBack => write!(f, "rolled_back"),
         }
     }
 }
@@ -79,6 +79,7 @@ impl UpdateScheduler {
     }
 
     /// Schedule an update
+    #[allow(clippy::too_many_arguments)]
     pub async fn schedule_update(
         &self,
         source_url: String,
@@ -131,6 +132,7 @@ impl UpdateScheduler {
     }
 
     /// Get a specific schedule by ID
+    #[allow(dead_code)]
     pub async fn get_schedule(&self, id: &str) -> Option<UpdateSchedule> {
         let schedules = self.schedules.read().await;
         schedules.get(id).cloned()
@@ -150,7 +152,7 @@ impl UpdateScheduler {
             } else {
                 Err(format!(
                     "Cannot cancel schedule in status: {}",
-                    schedule.status.to_string()
+                    schedule.status
                 ))
             }
         } else {
@@ -181,7 +183,7 @@ impl UpdateScheduler {
                 _ => {}
             }
 
-            debug!(schedule_id = %id, status = %schedule.status.to_string(), "Updated schedule status");
+            debug!(schedule_id = %id, status = %schedule.status, "Updated schedule status");
             drop(schedules);
             self.persist_schedules().await?;
             Ok(())
@@ -206,6 +208,7 @@ impl UpdateScheduler {
     }
 
     /// Trigger rollback for a schedule
+    #[allow(dead_code)]
     pub async fn trigger_rollback(
         &self,
         id: &str,
@@ -287,6 +290,7 @@ mod tests {
                 true,
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -306,9 +310,10 @@ mod tests {
             .schedule_update(
                 "http://example.com/update.squashfs".to_string(),
                 None,
-                None,
-                None,
+                Some(Utc::now() + chrono::Duration::hours(1)),
+                Some(3600),
                 false,
+                None, // post_update_hook
                 None,
                 None,
             )

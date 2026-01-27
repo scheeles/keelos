@@ -359,9 +359,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let otlp_endpoint = std::env::var("OTLP_ENDPOINT").ok();
     telemetry::init_telemetry("matic-agent", otlp_endpoint)?;
 
-    let grpc_addr = "0.0.0.0:50051".parse()?;
-    let health_addr = "0.0.0.0:9090".parse()?;
-    
+    let grpc_addr: std::net::SocketAddr = "0.0.0.0:50051".parse()?;
+    let health_addr: std::net::SocketAddr = "0.0.0.0:9090".parse()?;
+
     // Initialize update scheduler
     let scheduler = Arc::new(UpdateScheduler::new("/var/lib/matic/update-schedule.json"));
 
@@ -529,7 +529,8 @@ async fn execute_scheduled_update(
         &inactive.device,
         schedule.expected_sha256.as_deref(),
     )
-    .await.map_err(|e| e.to_string())?;
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Switch boot partition
     disk::switch_boot_partition(inactive.index).map_err(|e| e.to_string())?;
@@ -545,7 +546,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_status() {
-        let service = HelperNodeService::default();
+        let scheduler = Arc::new(UpdateScheduler::new("/tmp/test-schedules.json"));
+        let health_checker = Arc::new(HealthChecker::new(HealthCheckerConfig::default()));
+        let service = HelperNodeService {
+            scheduler,
+            health_checker,
+        };
         let request = tonic::Request::new(GetStatusRequest {});
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
