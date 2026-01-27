@@ -386,13 +386,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = "/etc/matic/node.yaml";
     let config = if std::path::Path::new(config_path).exists() {
         info!(path = config_path, "Loading configuration");
-        matic_config::NodeConfig::load(config_path)?
+        keel_config::NodeConfig::load(config_path)?
     } else {
         warn!(
             path = config_path,
             "Configuration not found, using defaults"
         );
-        matic_config::NodeConfig::default_config()
+        keel_config::NodeConfig::default_config()
     };
     info!(hostname = %config.hostname, "Configuration loaded");
 
