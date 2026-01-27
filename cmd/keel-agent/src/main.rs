@@ -51,7 +51,7 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetStatusResponse>, Status> {
         debug!("Received get_status request");
         let reply = GetStatusResponse {
-            hostname: "keel-node".to_string(),   // TODO: Get from hostname
+            hostname: "keel-node".to_string(),    // TODO: Get from hostname
             kernel_version: "6.6.14".to_string(), // TODO: Get from uname
             os_version: "0.1.0".to_string(),
             uptime_seconds: 0.0, // TODO: Get from /proc/uptime
@@ -88,9 +88,9 @@ impl NodeService for HelperNodeService {
         } else {
             None
         };
-        
+
         info!(
-            source = %source_url, 
+            source = %source_url,
             has_sha256 = expected_sha256.is_some(),
             is_delta = is_delta,
             has_fallback = fallback_url.is_some(),

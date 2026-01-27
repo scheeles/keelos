@@ -106,7 +106,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.reboot(request).await?;
             println!("Reboot Scheduled: {:?}", response.into_inner().scheduled);
         }
-        Commands::Update { source, sha256, delta, fallback, full_image_url } => {
+        Commands::Update {
+            source,
+            sha256,
+            delta,
+            fallback,
+            full_image_url,
+        } => {
             let request = tonic::Request::new(InstallUpdateRequest {
                 source_url: source.clone(),
                 expected_sha256: sha256.clone().unwrap_or_default(),

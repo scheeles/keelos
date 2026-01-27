@@ -163,7 +163,7 @@ pub async fn flash_image(
 ) -> io::Result<u64> {
     if is_delta {
         info!(url = %source_url, device = %target_device, "Attempting delta update");
-        
+
         match apply_delta_update(source_url, target_device, expected_sha256).await {
             Ok(bytes_saved) => {
                 info!(bytes_saved = bytes_saved, "Delta update successful");
@@ -171,12 +171,15 @@ pub async fn flash_image(
             }
             Err(e) => {
                 warn!(error = %e, "Delta update failed");
-                
+
                 if let Some(full_url) = fallback_url {
                     info!(fallback_url = %full_url, "Falling back to full image download");
                     flash_full_image(full_url, target_device, expected_sha256).await
                 } else {
-                    Err(io::Error::other(format!("Delta update failed and no fallback URL provided: {}", e)))
+                    Err(io::Error::other(format!(
+                        "Delta update failed and no fallback URL provided: {}",
+                        e
+                    )))
                 }
             }
         }
@@ -192,63 +195,67 @@ async fn apply_delta_update(
     expected_sha256: Option<&str>,
 ) -> io::Result<u64> {
     use std::io::Write;
-    
+
     info!(delta_url = %delta_url, "Downloading delta file");
-    
+
     // Download delta file to temporary location
     let delta_file = tempfile::NamedTempFile::new()?;
     let delta_path = delta_file.path();
-    
+
     let response = reqwest::get(delta_url)
         .await
         .map_err(|e| io::Error::other(format!("Delta download failed: {}", e)))?;
-    
+
     if !response.status().is_success() {
         return Err(io::Error::other(format!(
             "Server returned error for delta: {}",
             response.status()
         )));
     }
-    
+
     let delta_size = response.content_length().unwrap_or(0);
     info!(delta_size_bytes = delta_size, "Downloading delta");
-    
+
     // Write delta to temp file
-    let delta_bytes = response.bytes()
+    let delta_bytes = response
+        .bytes()
         .await
         .map_err(|e| io::Error::other(format!("Failed to download delta: {}", e)))?;
-    
+
     std::fs::write(delta_path, &delta_bytes)?;
     info!(delta_path = ?delta_path, "Delta file downloaded");
-    
+
     // Read the active (old) partition
     info!("Reading active partition for delta base");
     let active_partition = get_active_partition()?;
     let old_image = std::fs::read(&active_partition.device)
         .map_err(|e| io::Error::other(format!("Failed to read active partition: {}", e)))?;
-    
+
     info!(
         old_size_bytes = old_image.len(),
         old_device = %active_partition.device,
         "Read old image"
     );
-    
+
     // Apply bspatch
     info!("Applying binary patch");
     let mut new_image = Vec::new();
     let mut delta_cursor = std::io::Cursor::new(&delta_bytes);
     bsdiff::patch(&old_image, &mut delta_cursor, &mut new_image)
         .map_err(|e| io::Error::other(format!("bspatch failed: {}", e)))?;
-    
-    info!(new_size_bytes = new_image.len(), "Patch applied successfully");
-    
+
+    info!(
+        new_size_bytes = new_image.len(),
+        "Patch applied successfully"
+    );
+
     // Verify SHA256 if provided
     if let Some(expected) = expected_sha256 {
         if !expected.is_empty() {
             let mut hasher = Sha256::new();
             hasher.update(&new_image);
             let actual = format!("{:x}", hasher.finalize());
-            
+
             if actual != expected.to_lowercase() {
                 error!(expected = %expected, actual = %actual, "SHA256 verification failed");
                 return Err(io::Error::new(
@@ -259,19 +266,19 @@ async fn apply_delta_update(
             info!(hash = %actual, "SHA256 verification passed");
         }
     }
-    
+
     // Write patched image to target device
     info!(device = %target_device, size_bytes = new_image.len(), "Writing patched image");
     let mut target_file = std::fs::OpenOptions::new()
         .write(true)
         .open(target_device)?;
-    
+
     target_file.write_all(&new_image)?;
     target_file.flush()?;
     target_file.sync_all()?;
-    
+
     info!(device = %target_device, "Delta update completed");
-    
+
     // Calculate bandwidth savings (delta size vs full image size)
     let bytes_saved = new_image.len() as u64 - delta_size;
     Ok(bytes_saved)
