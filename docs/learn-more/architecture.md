@@ -44,13 +44,24 @@ graph TD
     User[Administrator] -->|gRPC / osctl| Agent[keel-agent]
     Agent -->|Updates| Partitions[Disk Partitions]
     Agent -->|Reboot| Init[keel-init]
+    Agent -->|Bootstrap Config| K8sConfig[/var/lib/keel/kubernetes]
     Init -->|Supervises| Agent
     Init -->|Supervises| Containerd[containerd]
     Init -->|Supervises| Kubelet[kubelet]
+    Kubelet -->|Reads kubeconfig| K8sConfig
     Kubelet -->|CRI| Containerd
-    Kubelet -->|Register| K8s[K8s API Server]
+    Kubelet -->|Register + Heartbeat| K8s[K8s API Server]
+    User -->|osctl bootstrap| Agent
 ```
 
+**Bootstrap Flow:**
+1.  **Administrator** runs `osctl bootstrap` with cluster credentials
+2.  **keel-agent** generates and persists kubeconfig to `/var/lib/keel/kubernetes/`
+3.  **keel-agent** signals kubelet restart
+4.  **kubelet** reads kubeconfig and registers with the Kubernetes API server
+5.  **Node** appears in the cluster and can accept workloads
+
+**Ongoing Operation:**
 1.  **Management**: The administrator talks to `keel-agent`.
 2.  **Orchestration**: `kubelet` talks to the Kubernetes Control Plane.
 3.  **Containers**: `kubelet` instructs `containerd` to run containers.

@@ -32,3 +32,32 @@ On first boot, the node generates a unique Machine ID and a self-signed certific
 In a managed cluster, the `keel-agent` will reach out to the control plane to register itself and download the cluster Certificate Authority (CA). This process is known as **bootstrapping**.
 
 Once bootstrapped, the node will only accept API commands signed by the Cluster CA, ensuring that unauthorized users cannot take control of the machine.
+
+## Joining a Kubernetes Cluster
+
+After the node has completed its first boot, you can join it to a Kubernetes cluster using the `osctl bootstrap` command. This configures the kubelet to connect to your cluster's API server.
+
+### Quick Start
+
+To join a cluster with a bootstrap token:
+
+```bash
+# On your Kubernetes control plane, create a bootstrap token
+kubectl create token node-bootstrapper --duration=24h --namespace=kube-system
+
+# Extract the cluster CA certificate  
+kubectl config view --raw \
+  -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+  | base64 -d > ca.crt
+
+# Bootstrap the KeelOS node
+osctl --endpoint http://<keelos-node-ip>:50051 bootstrap \
+  --api-server https://<k8s-api-server>:6443 \
+  --token <bootstrap-token> \
+  --ca-cert ca.crt
+
+# Verify the node joined
+kubectl get nodes
+```
+
+For detailed instructions, troubleshooting, and alternative authentication methods, see the [Kubernetes Bootstrap Guide](../guides/kubernetes-bootstrap.md).

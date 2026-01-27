@@ -29,6 +29,12 @@ service NodeService {
   
   // Get rollback history
   rpc GetRollbackHistory (GetRollbackHistoryRequest) returns (GetRollbackHistoryResponse);
+  
+  // Bootstrap Kubernetes cluster joining
+  rpc BootstrapKubernetes (BootstrapKubernetesRequest) returns (BootstrapKubernetesResponse);
+  
+  // Get Kubernetes bootstrap status
+  rpc GetBootstrapStatus (GetBootstrapStatusRequest) returns (GetBootstrapStatusResponse);
 }
 
 message InstallUpdateRequest {
@@ -177,4 +183,52 @@ message RollbackEvent {
   string from_partition = 3;
   string to_partition = 4;
   bool automatic = 5;
+}
+
+// Kubernetes Bootstrap messages
+
+message BootstrapKubernetesRequest {
+  // Kubernetes API server endpoint (e.g., "https://k8s.example.com:6443")
+  string api_server_endpoint = 1;
+  
+  // Bootstrap token for TLS bootstrapping (format: <token-id>.<token-secret>)
+  // Optional if kubeconfig is provided
+  string bootstrap_token = 2;
+  
+  // Cluster CA certificate in PEM format
+  // Required for token-based auth, optional if kubeconfig contains CA
+  string ca_cert_pem = 3;
+  
+  // Full kubeconfig content as bytes (alternative to token-based auth)
+  // If provided, bypasses token authentication
+  bytes kubeconfig = 4;
+  
+  // Override node name (default: hostname)
+  string node_name = 5;
+}
+
+message BootstrapKubernetesResponse {
+  bool success = 1;
+  string message = 2;
+  // Path where kubeconfig was written
+  string kubeconfig_path = 3;
+}
+
+message GetBootstrapStatusRequest {}
+
+message GetBootstrapStatusResponse {
+  // Whether node has been bootstrapped to a cluster
+  bool is_bootstrapped = 1;
+  
+  // API server endpoint if bootstrapped
+  string api_server_endpoint = 2;
+  
+  // Node name in the cluster
+  string node_name = 3;
+  
+  // Path to kubeconfig file
+  string kubeconfig_path = 4;
+  
+  // Bootstrap timestamp (RFC3339)
+  string bootstrapped_at = 5;
 }

@@ -3,6 +3,8 @@ use std::fs::File;
 use std::path::Path;
 use thiserror::Error;
 
+pub mod bootstrap;
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("IO error: {0}")]
