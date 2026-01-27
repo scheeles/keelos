@@ -8,7 +8,7 @@ use openssl::x509::extension::SubjectAlternativeName;
 use openssl::x509::{X509Name, X509Req};
 use std::fs;
 use std::path::Path;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 const SERVER_CERT_PATH: &str = "/etc/keel/crypto/server.pem";
 const SERVER_KEY_PATH: &str = "/etc/keel/crypto/server.key";

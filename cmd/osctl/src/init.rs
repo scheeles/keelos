@@ -109,7 +109,7 @@ pub async fn init_kubernetes(
 
     let csr = req_builder.build();
     let csr_der = csr.to_der()?;
-    let csr_b64 = base64::encode(&csr_der);
+    let _csr_b64 = base64::encode(&csr_der);
 
     println!("📋 Creating CertificateSigningRequest in Kubernetes...");
 
@@ -168,11 +168,11 @@ pub async fn init_kubernetes(
         let approval_condition = CertificateSigningRequestCondition {
             type_: "Approved".to_string(),
             status: "True".to_string(),
-            last_transition_time: k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
+            last_transition_time: Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
                 chrono::Utc::now(),
-            ),
-            message: "Approved by osctl".to_string(),
-            reason: "AutoApproved".to_string(),
+            )),
+            message: Some("Approved by osctl".to_string()),
+            reason: Some("AutoApproved".to_string()),
             last_update_time: None,
         };
 

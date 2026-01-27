@@ -169,7 +169,7 @@ async fn handle_init_command(cli: &Cli) -> Result<(), Box<dyn std::error::Error>
             init::init_bootstrap(node_addr, cert_path).await?;
         } else {
             // K8s PKI mode: get operational certificates
-            let kubeconfig_path = kubeconfig
+            let _kubeconfig_path = kubeconfig
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("~/.kube/config");
@@ -439,6 +439,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\n⚠️  Node is not bootstrapped to any Kubernetes cluster");
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
+        }
+        Commands::Init { .. } => {
+            // Init is handled earlier in command_name match and returns early
+            unreachable!("Init command should have returned early")
         }
     }
 

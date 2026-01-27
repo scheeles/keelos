@@ -23,7 +23,7 @@ pub async fn rotate_certificate(
 
     let cert_file = cert_path.join("client.pem");
     let key_file = cert_path.join("client.key");
-    let ca_file = cert_path.join("ca.pem");
+    let _ca_file = cert_path.join("ca.pem");
 
     // Check if existing certificate exists
     if !cert_file.exists() {

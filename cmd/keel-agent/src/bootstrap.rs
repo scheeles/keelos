@@ -58,7 +58,7 @@ pub fn sign_bootstrap_csr(csr_pem: &str) -> Result<String, Box<dyn std::error::E
     cert_builder.set_not_after(&not_after)?;
 
     // Add extensions for client certificate
-    let context = cert_builder.x509v3_context(Some(&ca_cert), None);
+    let _context = cert_builder.x509v3_context(Some(&ca_cert), None);
     let ext_key_usage = openssl::x509::extension::ExtendedKeyUsage::new()
         .client_auth()
         .build()?;

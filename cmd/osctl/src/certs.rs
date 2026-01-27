@@ -53,7 +53,8 @@ pub fn select_certificate_paths(command_name: &str) -> Result<CertPaths> {
 }
 
 /// Check if we should use mTLS for this command
-/// Returns true if certificates are available
+/// Whether mTLS should be used for a given command
+#[allow(dead_code)]
 pub fn should_use_mtls(command_name: &str) -> bool {
     select_certificate_paths(command_name).is_ok()
 }
