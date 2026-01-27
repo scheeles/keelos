@@ -167,16 +167,16 @@ pub async fn flash_image(
         match apply_delta_update(source_url, target_device, expected_sha256).await {
             Ok(bytes_saved) => {
                 info!(bytes_saved = bytes_saved, "Delta update successful");
-                return Ok(bytes_saved);
+                Ok(bytes_saved)
             }
             Err(e) => {
                 warn!(error = %e, "Delta update failed");
                 
                 if let Some(full_url) = fallback_url {
                     info!(fallback_url = %full_url, "Falling back to full image download");
-                    return flash_full_image(full_url, target_device, expected_sha256).await;
+                    flash_full_image(full_url, target_device, expected_sha256).await
                 } else {
-                    return Err(io::Error::other(format!("Delta update failed and no fallback URL provided: {}", e)));
+                    Err(io::Error::other(format!("Delta update failed and no fallback URL provided: {}", e)))
                 }
             }
         }
