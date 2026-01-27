@@ -88,7 +88,7 @@ pub fn generate_kubeconfig(
     api_server: &str,
     ca_cert_pem: &str,
     bootstrap_token: &str,
-    node_name: &str,
+    _node_name: &str,
 ) -> Result<String, BootstrapError> {
     // Validate inputs
     if api_server.is_empty() {
@@ -109,7 +109,8 @@ pub fn generate_kubeconfig(
     }
 
     // Base64 encode the CA certificate
-    let ca_data = base64::encode(ca_cert_pem);
+    use base64::{engine::general_purpose, Engine as _};
+    let ca_data = general_purpose::STANDARD.encode(ca_cert_pem);
 
     // Generate kubeconfig YAML
     let kubeconfig = format!(

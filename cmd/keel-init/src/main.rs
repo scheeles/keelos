@@ -11,12 +11,19 @@
 //! in a degraded/maintenance mode rather than crashing.
 
 use nix::mount::{mount, MsFlags};
-use nix::sys::stat::{umask, Mode};
+use libc::{c_int, SIGCHLD, SIGINT, SIGTERM};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
-use nix::unistd::Pid;
+use nix::unistd::{sethostname, Pid};
+use std::collections::HashMap;
+use std::fs;
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::{fs, thread, time};
-use tracing::{debug, error, info, warn, Level};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::{thread, time};
+use tracing::{debug, error, info, trace, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 mod telemetry;
