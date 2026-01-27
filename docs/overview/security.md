@@ -28,6 +28,9 @@ KeelOS enables the Linux Kernel Lockdown feature in "integrity" mode.
 All communication between the `osctl` CLI and the `keel-agent` on the node is encrypted and mutually authenticated.
 *   **Client Certificates**: You cannot talk to the API without a valid client certificate signed by the cluster CA.
 *   **Encryption**: All traffic is encrypted in transit using TLS 1.3.
+*   **Automatic Certificate Rotation**: Server certificates automatically rotate 30 days before expiry, eliminating manual certificate management and reducing the window of exposure if keys are compromised.
+
+See the [mTLS Certificate Rotation Guide](../security/mtls-certificate-rotation.md) for details on certificate management.
 
 ## Automated Updates & Rollback
 

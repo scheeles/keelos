@@ -67,6 +67,69 @@ osctl rollback history
 osctl rollback trigger --reason "Emergency"
 ```
 
+### `cert`
+Certificate management commands.
+
+#### `cert status`
+Display certificate status and expiry information.
+```bash
+osctl cert status
+```
+**Output:**
+- Common Name
+- Validity period (not before / not after)
+- Days until expiry
+- Warning if expiring soon (< 30 days)
+
+**Example:**
+```
+🔐 Certificate Status
+
+  Common Name: keel-agent
+  Not Before:  2026-01-27T20:14:00Z
+  Not After:   2026-04-27T20:14:00Z
+  Days Until Expiry: 89 days
+  ✅ Certificate is valid
+```
+
+#### `cert renew`
+Manually trigger certificate rotation.
+```bash
+osctl cert renew
+```
+
+**Use Cases:**
+- Security incident response
+- Testing rotation mechanism
+- Proactive renewal before long maintenance windows
+
+**Example:**
+```
+✅ Certificate renewed successfully
+   New expiry: 2026-04-27T20:14:00Z
+```
+
+#### `cert get-ca`
+Retrieve the CA certificate for client enrollment.
+```bash
+# Print to stdout
+osctl cert get-ca
+
+# Save to file
+osctl cert get-ca --output ca.pem
+```
+
+**Options:**
+- `--output <file>`: Save CA certificate to specified file
+
+**Example:**
+```bash
+$ osctl cert get-ca --output ca.pem
+✅ CA certificate saved to: ca.pem
+```
+
+**See Also:** [mTLS Certificate Rotation Guide](../security/mtls-certificate-rotation.md)
+
 ### `logs`
 Streams logs from system components.
 ```bash
