@@ -3,11 +3,9 @@
 //! Handles automatic certificate rotation before expiry.
 
 use crate::CryptoError;
-use rustls::pki_types::CertificateDer;
 use std::path::Path;
-use std::time::SystemTime;
 use thiserror::Error;
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
 
 #[derive(Error, Debug)]
 pub enum RotationError {

@@ -4,9 +4,7 @@
 
 use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DnType, IsCa, KeyPair, KeyUsagePurpose,
-    PKCS_ECDSA_P256_SHA256,
 };
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
@@ -46,14 +44,11 @@ impl CertificateAuthority {
         params.not_before = not_before;
         params.not_after = not_after;
 
-        params.alg = &PKCS_ECDSA_P256_SHA256;
-
-        let ca_cert = Certificate::from_params(params)
+        // Use ECDSA P-256 signature algorithm
+        let ca_cert = Certificate::generate_self_signed(params)
             .map_err(|e| CaError::CertGen(format!("Failed to generate CA certificate: {}", e)))?;
 
-        let ca_cert_pem = ca_cert
-            .serialize_pem()
-            .map_err(|e| CaError::CertGen(format!("Failed to serialize CA cert: {}", e)))?;
+        let ca_cert_pem = ca_cert.pem();
 
         Ok(Self {
             ca_cert,
@@ -72,11 +67,10 @@ impl CertificateAuthority {
         let key_pair = KeyPair::from_pem(&key_pem)
             .map_err(|e| CaError::Parse(format!("Failed to parse CA private key: {}", e)))?;
 
-        let params = CertificateParams::from_ca_cert_pem(&cert_pem, key_pair).map_err(|e| {
-            CaError::Parse(format!("Failed to parse CA certificate: {}", e))
-        })?;
+        let params = CertificateParams::from_ca_cert_pem(&cert_pem)
+            .map_err(|e| CaError::Parse(format!("Failed to parse CA certificate: {}", e)))?;
 
-        let ca_cert = Certificate::from_params(params)
+        let ca_cert = params.self_signed(&key_pair)
             .map_err(|e| CaError::Parse(format!("Failed to load CA certificate: {}", e)))?;
 
         Ok(Self {
@@ -115,17 +109,12 @@ impl CertificateAuthority {
         params.not_before = not_before;
         params.not_after = not_after;
 
-        params.alg = &PKCS_ECDSA_P256_SHA256;
-
-        let cert = Certificate::from_params(params).map_err(|e| {
-            CaError::CertGen(format!("Failed to generate certificate params: {}", e))
+        let cert = Certificate::generate(params, &self.ca_cert).map_err(|e| {
+            CaError::CertGen(format!("Failed to generate certificate: {}", e))
         })?;
 
-        let cert_pem = cert.serialize_pem_with_signer(&self.ca_cert).map_err(|e| {
-            CaError::CertGen(format!("Failed to sign certificate: {}", e))
-        })?;
-
-        let key_pem = cert.serialize_private_key_pem();
+        let cert_pem = cert.pem();
+        let key_pem = cert.key_pair().serialize_pem();
 
         Ok((cert_pem, key_pem))
     }
@@ -138,7 +127,7 @@ impl CertificateAuthority {
     ) -> Result<(), CaError> {
         fs::write(&cert_path, &self.ca_cert_pem)?;
 
-        let key_pem = self.ca_cert.serialize_private_key_pem();
+        let key_pem = self.ca_cert.key_pair().serialize_pem();
         fs::write(&key_path, key_pem)?;
 
         Ok(())
