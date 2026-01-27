@@ -313,8 +313,8 @@ mod tests {
                 Some(Utc::now()),
                 None,
                 true,
-                None,
-                None,
+                None,  // health_check_timeout_secs
+                None,  // pre_update_hook
                 None,  // post_update_hook
                 false, // is_delta
                 false, // fallback_to_full
@@ -341,6 +341,8 @@ mod tests {
                 Some(Utc::now() + chrono::Duration::hours(1)),
                 Some(3600),
                 false,
+                None,  // health_check_timeout_secs
+                None,  // pre_update_hook
                 None,  // post_update_hook
                 false, // is_delta
                 false, // fallback_to_full
