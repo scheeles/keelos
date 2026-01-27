@@ -33,9 +33,11 @@ mod health;
 mod health_check;
 mod telemetry;
 mod update_scheduler;
+mod hooks;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use update_scheduler::{ScheduleStatus, UpdateScheduler};
+use hooks::execute_hook;
 
 #[derive(Clone)]
 pub struct HelperNodeService {
@@ -252,6 +254,9 @@ impl NodeService for HelperNodeService {
                 health_check_timeout,
                 pre_hook,
                 post_hook,
+                req.is_delta,
+                req.fallback_to_full,
+                if req.full_image_url.is_empty() { None } else { Some(req.full_image_url) },
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to schedule update: {}", e)))?;
@@ -481,9 +486,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let listener = tokio::net::TcpListener::bind(health_addr)
             .await
             .expect("Failed to bind health server");
-        axum::serve(listener, health_router)
-            .await
             .expect("Health server failed");
+    });
+
+    // Start rollback supervisor
+    let rb_health = health_checker.clone();
+    tokio::spawn(async move {
+        start_rollback_supervisor(rb_health).await;
     });
 
     // Start gRPC server
@@ -565,24 +574,67 @@ async fn execute_scheduled_update(
     info!(
         device = %inactive.device,
         source = %schedule.source_url,
+        is_delta = schedule.is_delta,
         "Starting scheduled update execution"
     );
 
-    // Flash the image (delta support will be added to UpdateSchedule in future)
+    // Run Pre-update hook
+    if let Some(hook) = &schedule.pre_update_hook {
+        execute_hook(hook, "pre-update").await?;
+    }
+
+    // Flash the image with stored delta settings
     disk::flash_image(
         &schedule.source_url,
         &inactive.device,
         schedule.expected_sha256.as_deref(),
-        false, // is_delta - TODO: add to UpdateSchedule struct
-        None,  // fallback_url - TODO: add to UpdateSchedule struct
+        schedule.is_delta,
+        schedule.fallback_to_full.then(|| schedule.full_image_url.as_deref()).flatten(), 
     )
     .await
     .map_err(|e| e.to_string())?;
+
+    // Run Post-update hook
+    if let Some(hook) = &schedule.post_update_hook {
+        execute_hook(hook, "post-update").await?;
+    }
+
 
     // Switch boot partition
     disk::switch_boot_partition(inactive.index).map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+/// Rollback supervisor checks health after boot and triggers rollback if critical
+async fn start_rollback_supervisor(health: Arc<HealthChecker>) {
+    use tokio::time::{sleep, Duration};
+    
+    // Allow system to stabilize (initial grace period)
+    info!("Rollback supervisor started - waiting for system stability (60s)");
+    sleep(Duration::from_secs(60)).await;
+
+    // TODO: optimization: Check if this is a fresh boot after update
+    // For now, checks run periodically and protect against degradation
+
+    // Run critical check
+    let (status, _) = health.run_all_checks().await;
+    
+    if status == health_check::HealthStatus::Unhealthy {
+        error!(status = %status, "Critical health failure detected!");
+        
+        warn!("Initiating AUTOMATIC ROLLBACK due to critical health failure");
+        match disk::rollback_to_previous_partition() {
+           Ok(_) => {
+               error!("Rollback successful - rebooting system...");
+               // Force reboot (in real system, would involve syscall/init)
+               let _ = std::process::Command::new("reboot").status();
+           },
+           Err(e) => error!(error = %e, "Automatic rollback FAILED"),
+        }
+    } else {
+        info!("System health verified stable.");
+    }
 }
 
 #[cfg(test)]

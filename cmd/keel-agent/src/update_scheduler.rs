@@ -28,6 +28,10 @@ pub struct UpdateSchedule {
     pub pre_update_hook: Option<String>,
     pub post_update_hook: Option<String>,
     pub health_check_timeout_secs: Option<u32>,
+    // Delta support
+    pub is_delta: bool,
+    pub fallback_to_full: bool,
+    pub full_image_url: Option<String>,
     pub rollback_triggered: bool,
     pub rollback_reason: Option<String>,
     pub status: ScheduleStatus,
@@ -90,6 +94,10 @@ impl UpdateScheduler {
         health_check_timeout_secs: Option<u32>,
         pre_update_hook: Option<String>,
         post_update_hook: Option<String>,
+        // Delta params
+        is_delta: bool,
+        fallback_to_full: bool,
+        full_image_url: Option<String>,
     ) -> Result<UpdateSchedule, String> {
         let schedule = UpdateSchedule {
             id: Uuid::new_v4().to_string(),
@@ -103,6 +111,9 @@ impl UpdateScheduler {
             rollback_reason: None,
             pre_update_hook,
             post_update_hook,
+            is_delta,
+            fallback_to_full,
+            full_image_url,
             status: ScheduleStatus::Pending,
             created_at: Utc::now(),
             started_at: None,
@@ -290,7 +301,10 @@ mod tests {
                 true,
                 None,
                 None,
-                None,
+                None, // post_update_hook
+                false, // is_delta
+                false, // fallback_to_full
+                None, // full_image_url
             )
             .await
             .unwrap();
@@ -314,8 +328,9 @@ mod tests {
                 Some(3600),
                 false,
                 None, // post_update_hook
-                None,
-                None,
+                false, // is_delta
+                false, // fallback_to_full
+                None,  // full_image_url
             )
             .await
             .unwrap();
