@@ -294,18 +294,22 @@ mod tests {
             "http://example.com/full.img",
         ])
         .unwrap();
-        
-        if let Commands::Update { 
-            source, 
-            delta, 
-            fallback, 
-            full_image_url, 
-            .. 
-        } = cli.command {
+
+        if let Commands::Update {
+            source,
+            delta,
+            fallback,
+            full_image_url,
+            ..
+        } = cli.command
+        {
             assert_eq!(source, "http://example.com/update.delta");
             assert!(delta);
             assert!(fallback);
-            assert_eq!(full_image_url, Some("http://example.com/full.img".to_string()));
+            assert_eq!(
+                full_image_url,
+                Some("http://example.com/full.img".to_string())
+            );
         } else {
             panic!("Expected Update command");
         }
