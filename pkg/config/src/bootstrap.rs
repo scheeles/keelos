@@ -216,13 +216,8 @@ mod tests {
         let ca_cert = "-----BEGIN CERTIFICATE-----\nMIIC5zCCAc+gAwIBAgIBADANBgkqhkiG9w0BAQsFADAVMRMwEQYDVQQDEwprdWJl\n-----END CERTIFICATE-----\n";
         let token = "abcdef.0123456789abcdef";
 
-        let kubeconfig = generate_kubeconfig(
-            "https://k8s.example.com:6443",
-            ca_cert,
-            token,
-            "node-01",
-        )
-        .unwrap();
+        let kubeconfig =
+            generate_kubeconfig("https://k8s.example.com:6443", ca_cert, token, "node-01").unwrap();
 
         assert!(kubeconfig.contains("apiVersion: v1"));
         assert!(kubeconfig.contains("kind: Config"));
@@ -242,7 +237,10 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), BootstrapError::InvalidConfig(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            BootstrapError::InvalidConfig(_)
+        ));
     }
 
     #[test]

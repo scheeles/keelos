@@ -461,9 +461,8 @@ impl NodeService for HelperNodeService {
 
         // Write CA certificate
         if !req.ca_cert_pem.is_empty() {
-            std::fs::write(&ca_cert_path, &req.ca_cert_pem).map_err(|e| {
-                Status::internal(format!("Failed to write CA certificate: {}", e))
-            })?;
+            std::fs::write(&ca_cert_path, &req.ca_cert_pem)
+                .map_err(|e| Status::internal(format!("Failed to write CA certificate: {}", e)))?;
             info!(path = %ca_cert_path, "CA certificate written");
         }
 
@@ -485,9 +484,8 @@ impl NodeService for HelperNodeService {
         };
 
         // Write kubeconfig
-        std::fs::write(&kubeconfig_path, &kubeconfig_content).map_err(|e| {
-            Status::internal(format!("Failed to write kubeconfig: {}", e))
-        })?;
+        std::fs::write(&kubeconfig_path, &kubeconfig_content)
+            .map_err(|e| Status::internal(format!("Failed to write kubeconfig: {}", e)))?;
         info!(path = %kubeconfig_path, "Kubeconfig written");
 
         // Persist bootstrap configuration
@@ -499,16 +497,15 @@ impl NodeService for HelperNodeService {
         );
 
         let bootstrap_state_path = format!("{}/bootstrap.json", k8s_dir);
-        bootstrap_config.save(&bootstrap_state_path).map_err(|e| {
-            Status::internal(format!("Failed to save bootstrap state: {}", e))
-        })?;
+        bootstrap_config
+            .save(&bootstrap_state_path)
+            .map_err(|e| Status::internal(format!("Failed to save bootstrap state: {}", e)))?;
 
         // Signal kubelet restart
         let restart_signal_path = "/run/keel/restart-kubelet";
         std::fs::create_dir_all("/run/keel").ok();
-        std::fs::write(restart_signal_path, "1").map_err(|e| {
-            Status::internal(format!("Failed to create restart signal: {}", e))
-        })?;
+        std::fs::write(restart_signal_path, "1")
+            .map_err(|e| Status::internal(format!("Failed to create restart signal: {}", e)))?;
 
         info!(
             node_name = %node_name,
@@ -548,8 +545,8 @@ impl NodeService for HelperNodeService {
         }
 
         // Load bootstrap configuration
-        let config = keel_config::bootstrap::BootstrapConfig::load(&bootstrap_state_path)
-            .map_err(|e| {
+        let config =
+            keel_config::bootstrap::BootstrapConfig::load(&bootstrap_state_path).map_err(|e| {
                 Status::internal(format!("Failed to load bootstrap configuration: {}", e))
             })?;
 

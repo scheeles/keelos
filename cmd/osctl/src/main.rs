@@ -269,7 +269,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if result.success {
                 println!("\n✅ {}", result.message);
                 println!("📄 Kubeconfig: {}", result.kubeconfig_path);
-                println!("\n💡 Node will join the cluster shortly. Check with:\n   kubectl get nodes");
+                println!(
+                    "\n💡 Node will join the cluster shortly. Check with:\n   kubectl get nodes"
+                );
             } else {
                 eprintln!("\n❌ Bootstrap failed: {}", result.message);
                 std::process::exit(1);
