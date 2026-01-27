@@ -499,10 +499,10 @@ async fn schedule_executor(scheduler: Arc<UpdateScheduler>) {
                         .update_status(&schedule.id, ScheduleStatus::Completed, None)
                         .await;
                 }
-                Err(e) => {
-                    error!(schedule_id = %schedule.id, error = %e, "Scheduled update failed");
+                Err(error_msg) => {
+                    error!(schedule_id = %schedule.id, error = %error_msg, "Scheduled update failed");
                     let _ = scheduler
-                        .update_status(&schedule.id, ScheduleStatus::Failed, Some(e.to_string()))
+                        .update_status(&schedule.id, ScheduleStatus::Failed, Some(error_msg))
                         .await;
                 }
             }
@@ -513,9 +513,9 @@ async fn schedule_executor(scheduler: Arc<UpdateScheduler>) {
 /// Execute a scheduled update
 async fn execute_scheduled_update(
     schedule: &update_scheduler::UpdateSchedule,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), String> {
     // Get inactive partition
-    let inactive = disk::get_inactive_partition()?;
+    let inactive = disk::get_inactive_partition().map_err(|e| e.to_string())?;
 
     info!(
         device = %inactive.device,
@@ -529,10 +529,10 @@ async fn execute_scheduled_update(
         &inactive.device,
         schedule.expected_sha256.as_deref(),
     )
-    .await?;
+    .await.map_err(|e| e.to_string())?;
 
     // Switch boot partition
-    disk::switch_boot_partition(inactive.index)?;
+    disk::switch_boot_partition(inactive.index).map_err(|e| e.to_string())?;
 
     Ok(())
 }

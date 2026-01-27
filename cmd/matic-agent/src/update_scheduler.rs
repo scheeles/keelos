@@ -199,7 +199,7 @@ impl UpdateScheduler {
             .values()
             .filter(|s| {
                 s.status == ScheduleStatus::Pending
-                    && s.scheduled_at.map_or(false, |scheduled| scheduled <= now)
+                    && s.scheduled_at.is_some_and(|scheduled| scheduled <= now)
             })
             .cloned()
             .collect()
