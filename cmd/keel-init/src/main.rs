@@ -21,8 +21,8 @@ use std::{thread, time};
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
-mod telemetry;
 mod bootstrap_certs;
+mod telemetry;
 
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
 fn main() {

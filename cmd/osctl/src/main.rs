@@ -7,10 +7,13 @@ use keel_api::node::{
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
-use std::path::PathBuf;
 
-mod init;
 mod certs;
+mod init;
+mod rotate;
+
+mod certs;
+mod init;
 mod rotate;
 
 #[derive(Parser)]
@@ -58,23 +61,23 @@ enum Commands {
         /// Bootstrap mode: retrieve initial certificates from node
         #[arg(long)]
         bootstrap: bool,
-        
+
         /// Node IP address (required for bootstrap mode)
         #[arg(long)]
         node: Option<String>,
-        
+
         /// Path to kubeconfig (for K8s PKI mode)
         #[arg(long)]
         kubeconfig: Option<String>,
-        
+
         /// Certificate directory (default: ~/.keel)
         #[arg(long)]
         cert_dir: Option<String>,
-        
+
         /// Certificate name/CN (default: osctl-user)
         #[arg(long, default_value = "osctl-user")]
         cert_name: String,
-        
+
         /// Auto-approve CSR (K8s mode, requires admin permissions)
         #[arg(long)]
         auto_approve: bool,
@@ -84,15 +87,15 @@ enum Commands {
         /// Path to kubeconfig
         #[arg(long, default_value = "~/.kube/config")]
         kubeconfig: String,
-        
+
         /// Certificate directory (default: ~/.keel)
         #[arg(long)]
         cert_dir: Option<String>,
-        
+
         /// Certificate name/CN (default: osctl-user)
         #[arg(long)]
         cert_name: Option<String>,
-        
+
         /// Auto-approve CSR (requires admin permissions)
         #[arg(long)]
         auto_approve: bool,
@@ -190,7 +193,8 @@ async fn handle_rotate_command(cli: &Cli) -> Result<(), Box<dyn std::error::Erro
     } = &cli.command
     {
         let cert_path = cert_dir.as_ref().map(PathBuf::from);
-        rotate::rotate_certificate(kubeconfig, cert_path, cert_name.as_deref(), *auto_approve).await?;
+        rotate::rotate_certificate(kubeconfig, cert_path, cert_name.as_deref(), *auto_approve)
+            .await?;
     }
     Ok(())
 }
@@ -311,7 +315,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "  {} {} - {} ({}ms)",
                         icon, check.name, check.message, check.duration_ms
                     );
-                }\n            }\n        }
+                }
+            }
+        }
         Commands::RotateCert {
             kubeconfig,
             cert_dir,
@@ -319,7 +325,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             auto_approve,
         } => {
             let cert_path = cert_dir.as_ref().map(PathBuf::from);
-            rotate::rotate_certificate(kubeconfig, cert_path, cert_name.as_deref(), *auto_approve).await?;
+            rotate::rotate_certificate(kubeconfig, cert_path, cert_name.as_deref(), *auto_approve)
+                .await?;
         }
         Commands::CertInfo { cert_dir } => {
             let cert_path = cert_dir.as_ref().map(PathBuf::from);

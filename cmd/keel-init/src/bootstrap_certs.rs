@@ -15,7 +15,7 @@ const BOOTSTRAP_TIMESTAMP: &str = ".bootstrap-generated";
 /// Returns Ok(()) if certificates already exist or were successfully generated
 pub fn generate_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error>> {
     let cert_dir = Path::new(BOOTSTRAP_CERT_DIR);
-    
+
     // Create certificate directory
     fs::create_dir_all(cert_dir)?;
 
@@ -29,48 +29,48 @@ pub fn generate_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error
 
     // Generate self-signed CA with 24-hour validity
     let ca_keypair = KeyPair::generate(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-    
+
     let mut ca_params = CertificateParams::new(vec!["KeelOS Bootstrap CA".to_string()]);
     ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
     ca_params.key_usages = vec![
         rcgen::KeyUsagePurpose::KeyCertSign,
         rcgen::KeyUsagePurpose::CrlSign,
     ];
-    
+
     let mut ca_dn = DistinguishedName::new();
     ca_dn.push(DnType::CommonName, "KeelOS Bootstrap CA");
     ca_dn.push(DnType::OrganizationName, "KeelOS");
     ca_params.distinguished_name = ca_dn;
-    
+
     // Set 24-hour validity
     let now = std::time::SystemTime::now();
     let not_before = now.duration_since(UNIX_EPOCH)?.as_secs();
     let not_after = not_before + 86400; // 24 hours
     ca_params.not_before = time::OffsetDateTime::from_unix_timestamp(not_before as i64)?;
     ca_params.not_after = time::OffsetDateTime::from_unix_timestamp(not_after as i64)?;
-    
+
     let ca_cert = Certificate::from_params(ca_params)?;
     let ca_cert_pem = ca_cert.serialize_pem()?;
     let ca_key_pem = ca_keypair.serialize_pem();
 
     // Generate initial client certificate with 24-hour validity
     let client_keypair = KeyPair::generate(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-    
+
     let mut client_params = CertificateParams::new(vec!["bootstrap-admin".to_string()]);
     client_params.key_usages = vec![
         rcgen::KeyUsagePurpose::DigitalSignature,
         rcgen::KeyUsagePurpose::KeyEncipherment,
     ];
     client_params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ClientAuth];
-    
+
     let mut client_dn = DistinguishedName::new();
     client_dn.push(DnType::CommonName, "bootstrap-admin");
     client_params.distinguished_name = client_dn;
-    
+
     // Set 24-hour validity
     client_params.not_before = time::OffsetDateTime::from_unix_timestamp(not_before as i64)?;
     client_params.not_after = time::OffsetDateTime::from_unix_timestamp(not_after as i64)?;
-    
+
     let client_cert_pem = client_params.serialize_pem_with_signer(&ca_cert)?;
     let client_key_pem = client_keypair.serialize_pem();
 
@@ -81,13 +81,11 @@ pub fn generate_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error
     fs::write(cert_dir.join(BOOTSTRAP_CLIENT_KEY), &client_key_pem)?;
 
     // Write timestamp marker
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)?
-        .as_secs();
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     fs::write(cert_dir.join(BOOTSTRAP_TIMESTAMP), timestamp.to_string())?;
 
     info!("Bootstrap certificates generated successfully (valid for 24 hours)");
-    
+
     // Display bootstrap instructions
     display_bootstrap_instructions();
 
@@ -110,7 +108,7 @@ fn display_bootstrap_instructions() {
 /// This should be called after the node successfully joins a Kubernetes cluster
 pub fn cleanup_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error>> {
     let cert_dir = Path::new(BOOTSTRAP_CERT_DIR);
-    
+
     if !cert_dir.exists() {
         info!("Bootstrap certificate directory does not exist, nothing to clean up");
         return Ok(());

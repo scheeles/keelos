@@ -19,9 +19,8 @@ use keel_api::node::{
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
     RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
-    SignBootstrapCertificateRequest, SignBootstrapCertificateResponse,
-    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
-    UpdateSchedule as ProtoUpdateSchedule,
+    SignBootstrapCertificateRequest, SignBootstrapCertificateResponse, TriggerRollbackRequest,
+    TriggerRollbackResponse, UpdateProgress, UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -30,14 +29,14 @@ use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+mod bootstrap;
 mod disk;
 mod health;
 mod health_check;
 mod hooks;
+mod server_cert;
 mod telemetry;
 mod update_scheduler;
-mod bootstrap;
-mod server_cert;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
@@ -639,7 +638,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Configuration not found, using defaults"
         );
         keel_config::NodeConfig::default_config()
-    };\n    info!(hostname = %config.hostname, "Configuration loaded");
+    };
+    info!(hostname = %config.hostname, "Configuration loaded");
 
     // Request server certificate from Kubernetes if needed
     if bootstrap::is_bootstrapped() {
@@ -647,7 +647,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let node_ip = std::env::var("NODE_IP")
             .or_else(|_| std::env::var("POD_IP"))
             .unwrap_or_else(|_| "127.0.0.1".to_string());
-        
+
         if let Err(e) = server_cert::request_server_certificate(&node_ip).await {
             warn!(
                 error = %e,
@@ -674,7 +674,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Determine which CA to use: bootstrap (before K8s) or K8s (after join)
         let is_bootstrapped = bootstrap::is_bootstrapped();
-        
+
         if is_bootstrapped && std::path::Path::new(k8s_ca_path).exists() {
             // After K8s join: use K8s CA
             info!("Using Kubernetes CA for client authentication");
