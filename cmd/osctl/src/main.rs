@@ -241,7 +241,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         },
-<<<<<<< HEAD
         Commands::Bootstrap {
             api_server,
             token,
