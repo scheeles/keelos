@@ -19,6 +19,7 @@ use keel_api::node::{
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
     RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
+    SignBootstrapCertificateRequest, SignBootstrapCertificateResponse,
     TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
     UpdateSchedule as ProtoUpdateSchedule,
 };
@@ -35,6 +36,7 @@ mod health_check;
 mod hooks;
 mod telemetry;
 mod update_scheduler;
+mod bootstrap;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
@@ -407,6 +409,37 @@ impl NodeService for HelperNodeService {
         }))
     }
 
+    async fn sign_bootstrap_certificate(
+        &self,
+        request: Request<SignBootstrapCertificateRequest>,
+    ) -> Result<Response<SignBootstrapCertificateResponse>, Status> {
+        debug!("Sign bootstrap certificate requested");
+
+        // Only sign CSRs if node hasn't joined K8s yet
+        if bootstrap::is_bootstrapped() {
+            return Err(Status::failed_precondition(
+                "Node already bootstrapped - use osctl init with kubeconfig",
+            ));
+        }
+
+        let req = request.into_inner();
+
+        // Sign the CSR with bootstrap CA
+        let signed_cert = bootstrap::sign_bootstrap_csr(&req.csr_pem)
+            .map_err(|e| Status::internal(format!("Failed to sign CSR: {}", e)))?;
+
+        // Get CA certificate
+        let ca_cert = bootstrap::get_bootstrap_ca()
+            .map_err(|e| Status::internal(format!("Failed to read CA: {}", e)))?;
+
+        info!("Signed bootstrap client certificate from CSR");
+
+        Ok(Response::new(SignBootstrapCertificateResponse {
+            client_cert_pem: signed_cert,
+            ca_cert_pem: ca_cert,
+        }))
+    }
+
     async fn bootstrap_kubernetes(
         &self,
         request: Request<BootstrapKubernetesRequest>,
@@ -556,6 +589,11 @@ impl NodeService for HelperNodeService {
             node_name: config.node_name,
             kubeconfig_path: config.kubeconfig_path,
             bootstrapped_at: config.bootstrapped_at,
+            } else {
+                "".to_string()
+            },
+            bootstrap_time: "".to_string(),
+>>>>>>> dee0ae3 (feat: implement bootstrap CSR signing RPC in keel-agent)
         }))
     }
 }

@@ -36,6 +36,11 @@ tracing-opentelemetry = "0.22"
 sysinfo = "0.30"
 async-trait = "0.1"
 
+# Certificate signing for bootstrap
+openssl = "0.10"
+rcgen = { version = "0.12", features = ["pem", "x509-parser"] }
+time = "0.3"
+
 # Delta update support
 bsdiff = { workspace = true }
 tempfile = "3.0"
