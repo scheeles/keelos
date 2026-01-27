@@ -8,7 +8,6 @@
 use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{runtime, Resource};
-use prometheus::{Encoder, Registry, TextEncoder};
 use sysinfo::System;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -53,8 +52,7 @@ pub fn init_telemetry(
         .map(|t| tracing_opentelemetry::layer().with_tracer(t.clone()));
 
     // Set up structured logging with optional OpenTelemetry
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let subscriber = tracing_subscriber::registry()
         .with(env_filter)
@@ -74,18 +72,15 @@ pub fn shutdown_telemetry() {
     global::shutdown_tracer_provider();
 }
 
-/// System metrics collector
+/// System metrics collector using sysinfo
 pub struct SystemMetrics {
     system: System,
-    registry: Registry,
 }
 
 impl SystemMetrics {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let registry = Registry::new();
         Ok(Self {
             system: System::new_all(),
-            registry,
         })
     }
 
@@ -94,36 +89,32 @@ impl SystemMetrics {
         self.system.refresh_all();
     }
 
-    /// Get Prometheus metrics as text
-    pub fn export_metrics(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let encoder = TextEncoder::new();
-        let metric_families = self.registry.gather();
-        let mut buffer = Vec::new();
-        encoder.encode(&metric_families, &mut buffer)?;
-        Ok(String::from_utf8(buffer)?)
-    }
-
     /// Get CPU usage percentage
+    #[allow(dead_code)]
     pub fn cpu_usage(&self) -> f32 {
         self.system.global_cpu_info().cpu_usage()
     }
 
     /// Get total memory in bytes
+    #[allow(dead_code)]
     pub fn total_memory(&self) -> u64 {
         self.system.total_memory()
     }
 
     /// Get used memory in bytes
+    #[allow(dead_code)]
     pub fn used_memory(&self) -> u64 {
         self.system.used_memory()
     }
 
     /// Get total swap in bytes
+    #[allow(dead_code)]
     pub fn total_swap(&self) -> u64 {
         self.system.total_swap()
     }
 
     /// Get used swap in bytes
+    #[allow(dead_code)]
     pub fn used_swap(&self) -> u64 {
         self.system.used_swap()
     }

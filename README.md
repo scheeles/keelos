@@ -18,18 +18,93 @@ MaticOS is an immutable, API-driven Linux distribution designed exclusively for 
 *   **/cmd**: Binaries (`matic-init`, `matic-agent`, `osctl`).
 *   **/system**: Static manifests and bootstrap configuration.
 *   **/tools**: Build systems and test harnesses.
+*   **/docs**: Documentation and API specifications.
 *   **/.ai-context**: Documentation for AI agents contributing to this repo.
 
-## Getting Started
+## Features
 
-*(Coming Soon in Phase 1)*
+### ✅ Phase 1: Update Scheduling (Complete)
+- Scheduled OS updates with maintenance windows
+- Pre/post-update hooks for custom workflows  
+- Persistent schedule tracking across reboots
+- gRPC API for update management
 
-To build the OS image:
+### ✅ Phase 2: Automatic Rollback (Complete)
+- **Health Check Framework**: Pluggable health checks (boot, service, network, API)
+- **Automatic Rollback**: Failed health checks trigger automatic partition rollback
+- **Boot Loop Protection**: Detects boot loops and prevents infinite rollback cycles
+- **Manual Rollback**: Emergency rollback via CLI or API
+- **Rollback History**: Audit trail of all rollback events
+
+### 🚧 Phase 3: Delta Updates (Planned)
+- Binary diff generation for efficient updates
+- Reduced bandwidth usage
+- Incremental update support
+
+## Quick Start
+
+### Building
+
+Build the OS image:
 ```bash
 ./tools/builder/build.sh
 ```
 
-To run in QEMU:
+### Running
+
+Run in QEMU for testing:
 ```bash
 ./tools/testing/run-qemu.sh
 ```
+
+### Managing Updates
+
+Check system health:
+```bash
+osctl health
+```
+
+Schedule an update with automatic rollback:
+```bash
+osctl schedule update \
+  --source http://update-server/os-v2.0.squashfs \
+  --enable-auto-rollback \
+  --health-check-timeout 300
+```
+
+Manually trigger rollback if needed:
+```bash
+osctl rollback trigger --reason "Emergency recovery"
+```
+
+View rollback history:
+```bash
+osctl rollback history
+```
+
+## Documentation
+
+- [Getting Started Guide](docs/getting-started.md)
+- [Architecture Overview](docs/architecture.md)
+- [Health Check and Rollback API](docs/api/health-and-rollback.md)
+- [Using osctl](docs/using-osctl.md)
+
+## Development
+
+Run integration tests:
+```bash
+./tools/test-rollback-flow.sh
+```
+
+Build individual components:
+```bash
+# Build matic-agent
+cargo build --package matic-agent
+
+# Build osctl CLI
+cargo build --package osctl
+```
+
+## License
+
+This project is licensed under the Apache License 2.0.

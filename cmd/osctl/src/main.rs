@@ -1,6 +1,9 @@
 use clap::{Parser, Subcommand};
 use matic_api::node::node_service_client::NodeServiceClient;
-use matic_api::node::{GetStatusRequest, InstallUpdateRequest, RebootRequest};
+use matic_api::node::{
+    GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest,
+    RebootRequest, TriggerRollbackRequest,
+};
 use tokio_stream::StreamExt;
 
 #[derive(Parser)]
@@ -32,6 +35,25 @@ enum Commands {
         #[arg(long)]
         sha256: Option<String>,
     },
+    /// Get system health status
+    Health,
+    /// Rollback operations
+    Rollback {
+        #[command(subcommand)]
+        action: RollbackAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum RollbackAction {
+    /// Manually trigger rollback to previous partition
+    Trigger {
+        /// Reason for rollback
+        #[arg(long, default_value = "Manual rollback via osctl")]
+        reason: String,
+    },
+    /// View rollback history
+    History,
 }
 
 #[tokio::main]
@@ -89,6 +111,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        Commands::Health => {
+            let request = tonic::Request::new(GetHealthRequest {});
+            let response = client.get_health(request).await?;
+            let health = response.into_inner();
+
+            println!("\n🏥 System Health: {}", health.status.to_uppercase());
+            println!("Last Updated: {}\n", health.last_update_time);
+
+            if !health.checks.is_empty() {
+                println!("Health Checks:");
+                for check in health.checks {
+                    let icon = match check.status.as_str() {
+                        "pass" => "✅",
+                        "fail" => "❌",
+                        _ => "⚠️",
+                    };
+                    println!(
+                        "  {} {} - {} ({}ms)",
+                        icon, check.name, check.message, check.duration_ms
+                    );
+                }
+            }
+        }
+        Commands::Rollback { action } => match action {
+            RollbackAction::Trigger { reason } => {
+                let request = tonic::Request::new(TriggerRollbackRequest {
+                    reason: reason.clone(),
+                });
+                let response = client.trigger_rollback(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                } else {
+                    println!("❌ {}", result.message);
+                }
+            }
+            RollbackAction::History => {
+                let request = tonic::Request::new(GetRollbackHistoryRequest {});
+                let response = client.get_rollback_history(request).await?;
+                let history = response.into_inner();
+
+                if history.events.is_empty() {
+                    println!("No rollback events found.");
+                } else {
+                    println!("\n🔄 Rollback History ({} events):\n", history.events.len());
+                    for event in history.events {
+                        println!("  Timestamp: {}", event.timestamp);
+                        println!("  Reason: {}", event.reason);
+                        println!(
+                            "  Type: {}",
+                            if event.automatic {
+                                "Automatic"
+                            } else {
+                                "Manual"
+                            }
+                        );
+                        println!();
+                    }
+                }
+            }
+        },
     }
 
     Ok(())
@@ -180,5 +264,31 @@ mod tests {
     fn test_cli_help_available() {
         // Verify help is available without panicking
         let _cmd = Cli::command();
+    }
+
+    #[test]
+    fn test_cli_parsing_health() {
+        let cli = Cli::try_parse_from(["osctl", "health"]).unwrap();
+        assert!(matches!(cli.command, Commands::Health));
+    }
+
+    #[test]
+    fn test_cli_parsing_rollback_trigger() {
+        let cli = Cli::try_parse_from(["osctl", "rollback", "trigger"]).unwrap();
+        if let Commands::Rollback { action } = cli.command {
+            assert!(matches!(action, RollbackAction::Trigger { .. }));
+        } else {
+            panic!("Expected Rollback command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_rollback_history() {
+        let cli = Cli::try_parse_from(["osctl", "rollback", "history"]).unwrap();
+        if let Commands::Rollback { action } = cli.command {
+            assert!(matches!(action, RollbackAction::History));
+        } else {
+            panic!("Expected Rollback command");
+        }
     }
 }

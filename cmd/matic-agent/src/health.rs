@@ -5,13 +5,7 @@
 //! - /readyz - Readiness check
 //! - /metrics - Prometheus metrics
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-    Json, Router,
-};
+use axum::{extract::State, response::IntoResponse, routing::get, Json, Router};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -73,19 +67,21 @@ async fn readyz() -> impl IntoResponse {
 
 /// Metrics endpoint handler
 ///
-/// Returns Prometheus-compatible metrics
+/// Returns system metrics in JSON format
 async fn metrics(State(state): State<Arc<HealthState>>) -> impl IntoResponse {
     let mut metrics = state.metrics.write().await;
     metrics.update();
 
-    match metrics.export_metrics() {
-        Ok(text) => (StatusCode::OK, text).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to export metrics: {}", e),
-        )
-            .into_response(),
-    }
+    // Return basic system info as JSON
+    let response = serde_json::json!({
+        "cpu_usage": metrics.cpu_usage(),
+        "total_memory_bytes": metrics.total_memory(),
+        "used_memory_bytes": metrics.used_memory(),
+        "total_swap_bytes": metrics.total_swap(),
+        "used_swap_bytes": metrics.used_swap(),
+    });
+
+    Json(response).into_response()
 }
 
 /// Create health check router
@@ -111,7 +107,12 @@ mod tests {
         let app = create_health_router(state);
 
         let response = app
-            .oneshot(Request::builder().uri("/healthz").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
@@ -125,7 +126,12 @@ mod tests {
         let app = create_health_router(state);
 
         let response = app
-            .oneshot(Request::builder().uri("/readyz").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/readyz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
 
