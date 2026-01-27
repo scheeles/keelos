@@ -26,6 +26,7 @@ pub enum HealthCheckResult {
 }
 
 impl HealthCheckResult {
+    #[allow(dead_code)]
     pub fn is_passing(&self) -> bool {
         matches!(self, HealthCheckResult::Pass)
     }
@@ -47,12 +48,12 @@ pub enum HealthStatus {
     Unhealthy,
 }
 
-impl ToString for HealthStatus {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for HealthStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HealthStatus::Healthy => "healthy".to_string(),
-            HealthStatus::Degraded => "degraded".to_string(),
-            HealthStatus::Unhealthy => "unhealthy".to_string(),
+            HealthStatus::Healthy => write!(f, "healthy"),
+            HealthStatus::Degraded => write!(f, "degraded"),
+            HealthStatus::Unhealthy => write!(f, "unhealthy"),
         }
     }
 }
@@ -72,6 +73,7 @@ pub trait HealthCheck: Send + Sync {
     async fn check(&self) -> HealthCheckResult;
 
     /// Get the check name
+    #[allow(dead_code)]
     fn name(&self) -> String;
 
     /// Is this a critical check (failure means rollback)
@@ -110,11 +112,13 @@ impl HealthCheck for BootCheck {
 }
 
 /// Service status check
+#[allow(dead_code)]
 pub struct ServiceCheck {
     service_name: String,
 }
 
 impl ServiceCheck {
+    #[allow(dead_code)]
     pub fn new(service_name: impl Into<String>) -> Self {
         Self {
             service_name: service_name.into(),
@@ -239,8 +243,11 @@ impl HealthCheck for ApiCheck {
 /// Health checker configuration
 #[derive(Debug, Clone)]
 pub struct HealthCheckerConfig {
+    #[allow(dead_code)]
     pub timeout_secs: u32,
+    #[allow(dead_code)]
     pub retry_interval_secs: u32,
+    #[allow(dead_code)]
     pub max_retries: u32,
 }
 
@@ -257,6 +264,7 @@ impl Default for HealthCheckerConfig {
 /// Health checker orchestrator
 pub struct HealthChecker {
     checks: Arc<RwLock<HashMap<String, Box<dyn HealthCheck>>>>,
+    #[allow(dead_code)]
     config: HealthCheckerConfig,
     last_results: Arc<RwLock<Vec<CheckExecution>>>,
 }
@@ -279,6 +287,7 @@ impl HealthChecker {
     }
 
     /// Register a custom health check
+    #[allow(dead_code)]
     pub async fn register_check(&self, check: Box<dyn HealthCheck>) {
         let name = check.name();
         let mut checks = self.checks.write().await;
@@ -308,15 +317,12 @@ impl HealthChecker {
 
             executions.push(execution);
 
-            match result {
-                HealthCheckResult::Fail(_) => {
-                    if check.is_critical() {
-                        critical_failures += 1;
-                    } else {
-                        non_critical_failures += 1;
-                    }
+            if let HealthCheckResult::Fail(_) = result {
+                if check.is_critical() {
+                    critical_failures += 1;
+                } else {
+                    non_critical_failures += 1;
                 }
-                _ => {}
             }
         }
 
@@ -344,6 +350,7 @@ impl HealthChecker {
     }
 
     /// Run health checks with retry logic until timeout or success
+    #[allow(dead_code)]
     pub async fn run_with_retry(&self) -> HealthStatus {
         let start = Instant::now();
         let timeout = Duration::from_secs(self.config.timeout_secs as u64);
@@ -385,6 +392,7 @@ impl HealthChecker {
     }
 
     /// Get the last check results
+    #[allow(dead_code)]
     pub async fn get_last_results(&self) -> Vec<CheckExecution> {
         let results = self.last_results.read().await;
         results.clone()

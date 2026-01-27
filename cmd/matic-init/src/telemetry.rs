@@ -37,7 +37,7 @@ impl BootPhaseTracker {
     /// Start tracking a new phase
     pub fn start_phase(&mut self, name: impl Into<String>) {
         let name = name.into();
-        
+
         // End current phase if any
         if let Some((prev_name, prev_start)) = self.current_phase.take() {
             let duration = prev_start.elapsed();
@@ -110,10 +110,10 @@ mod tests {
 
         tracker.start_phase("filesystem");
         thread::sleep(Duration::from_millis(10));
-        
+
         tracker.start_phase("network");
         thread::sleep(Duration::from_millis(10));
-        
+
         tracker.end_current_phase();
 
         let metrics = tracker.get_metrics();

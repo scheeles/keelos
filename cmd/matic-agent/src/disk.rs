@@ -5,7 +5,6 @@
 //! - Flashing OS images to partitions with optional SHA256 verification
 //! - Switching boot partitions using GPT attributes
 
-
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -307,21 +306,11 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
 /// State file for tracking rollback information
 const ROLLBACK_STATE_FILE: &str = "/var/lib/matic/rollback_state.json";
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct RollbackState {
     previous_partition: Option<u32>,
     boot_counter: u32,
     last_update_time: Option<String>,
-}
-
-impl Default for RollbackState {
-    fn default() -> Self {
-        Self {
-            previous_partition: None,
-            boot_counter: 0,
-            last_update_time: None,
-        }
-    }
 }
 
 /// Load rollback state from disk
@@ -348,6 +337,7 @@ fn save_rollback_state(state: &RollbackState) -> io::Result<()> {
 }
 
 /// Track the current active partition before switching (for rollback)
+#[allow(dead_code)]
 pub fn record_active_partition_for_rollback() -> io::Result<()> {
     let active = get_active_partition()?;
     let mut state = load_rollback_state();
@@ -390,11 +380,13 @@ pub fn rollback_to_previous_partition() -> io::Result<()> {
 }
 
 /// Get the current boot counter
+#[allow(dead_code)]
 pub fn get_boot_counter() -> u32 {
     load_rollback_state().boot_counter
 }
 
 /// Increment the boot counter (called on each boot)
+#[allow(dead_code)]
 pub fn increment_boot_counter() -> io::Result<()> {
     let mut state = load_rollback_state();
     state.boot_counter += 1;
@@ -407,6 +399,7 @@ pub fn increment_boot_counter() -> io::Result<()> {
 }
 
 /// Clear the boot counter after successful boot + health checks
+#[allow(dead_code)]
 pub fn clear_boot_counter() -> io::Result<()> {
     let mut state = load_rollback_state();
     state.boot_counter = 0;
@@ -416,6 +409,7 @@ pub fn clear_boot_counter() -> io::Result<()> {
 }
 
 /// Check if we're in a boot loop (too many failed boots)
+#[allow(dead_code)]
 pub fn is_boot_loop() -> bool {
     const MAX_BOOT_ATTEMPTS: u32 = 3;
     let counter = get_boot_counter();
