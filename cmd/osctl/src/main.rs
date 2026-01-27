@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
-    BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetHealthRequest,
-    GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest, RebootRequest,
-    TriggerRollbackRequest,
+    BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetCaCertificateRequest,
+    GetCertificateInfoRequest, GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest,
+    InstallUpdateRequest, RebootRequest, RenewCertificateRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -73,6 +73,11 @@ enum Commands {
     },
     /// Get Kubernetes bootstrap status
     BootstrapStatus,
+    /// Certificate management
+    Cert {
+        #[command(subcommand)]
+        action: CertAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -85,6 +90,20 @@ enum RollbackAction {
     },
     /// View rollback history
     History,
+}
+
+#[derive(Subcommand)]
+enum CertAction {
+    /// Manually trigger certificate rotation
+    Renew,
+    /// Get certificate status and expiry information
+    Status,
+    /// Download the CA certificate for client setup
+    GetCa {
+        /// Output file for CA certificate (default: stdout)
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -222,6 +241,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         },
+<<<<<<< HEAD
         Commands::Bootstrap {
             api_server,
             token,
@@ -293,6 +313,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
         }
+        Commands::Cert { action } => match action {
+            CertAction::Renew => {
+                let request = tonic::Request::new(RenewCertificateRequest {});
+                let response = client.renew_certificate(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ Certificate renewed successfully");
+                    println!("   New expiry: {}", result.not_after);
+                } else {
+                    println!("❌ Certificate renewal failed: {}", result.message);
+                }
+            }
+            CertAction::Status => {
+                let request = tonic::Request::new(GetCertificateInfoRequest {});
+                let response = client.get_certificate_info(request).await?;
+                let info = response.into_inner();
+
+                println!("\n🔐 Certificate Status\n");
+                println!("  Common Name: {}", info.common_name);
+                println!("  Not Before:  {}", info.not_before);
+                println!("  Not After:   {}", info.not_after);
+                println!(
+                    "  Days Until Expiry: {} days",
+                    info.days_until_expiry
+                );
+
+                if info.is_expiring_soon {
+                    println!("  ⚠️  WARNING: Certificate is expiring soon!");
+                } else {
+                    println!("  ✅ Certificate is valid");
+                }
+            }
+            CertAction::GetCa { output } => {
+                let request = tonic::Request::new(GetCaCertificateRequest {});
+                let response = client.get_ca_certificate(request).await?;
+                let ca_cert = response.into_inner().ca_cert_pem;
+
+                if let Some(output_file) = output {
+                    std::fs::write(output_file, &ca_cert)?;
+                    println!("✅ CA certificate saved to: {}", output_file);
+                } else {
+                    println!("{}", ca_cert);
+                }
+            }
+        },
     }
 
     Ok(())
@@ -443,6 +509,51 @@ mod tests {
             assert!(matches!(action, RollbackAction::History));
         } else {
             panic!("Expected Rollback command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_cert_renew() {
+        let cli = Cli::try_parse_from(["osctl", "cert", "renew"]).unwrap();
+        if let Commands::Cert { action } = cli.command {
+            assert!(matches!(action, CertAction::Renew));
+        } else {
+            panic!("Expected Cert command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_cert_status() {
+        let cli = Cli::try_parse_from(["osctl", "cert", "status"]).unwrap();
+        if let Commands::Cert { action } = cli.command {
+            assert!(matches!(action, CertAction::Status));
+        } else {
+            panic!("Expected Cert command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_cert_get_ca() {
+        let cli = Cli::try_parse_from(["osctl", "cert", "get-ca"]).unwrap();
+        if let Commands::Cert { action } = cli.command {
+            assert!(matches!(action, CertAction::GetCa { output: None }));
+        } else {
+            panic!("Expected Cert command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_cert_get_ca_with_output() {
+        let cli =
+            Cli::try_parse_from(["osctl", "cert", "get-ca", "--output", "ca.pem"]).unwrap();
+        if let Commands::Cert { action } = cli.command {
+            if let CertAction::GetCa { output } = action {
+                assert_eq!(output, Some("ca.pem".to_string()));
+            } else {
+                panic!("Expected GetCa action");
+            }
+        } else {
+            panic!("Expected Cert command");
         }
     }
 }
