@@ -75,7 +75,7 @@ fn run() -> Result<(), InitError> {
 
     // Export boot metrics
     boot_tracker.end_current_phase();
-    if let Err(e) = boot_tracker.export_to_file("/run/matic/boot-metrics.json") {
+    if let Err(e) = boot_tracker.export_to_file("/run/keel/boot-metrics.json") {
         warn!(error = %e, "Failed to export boot metrics");
     }
 

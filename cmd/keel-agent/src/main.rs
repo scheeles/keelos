@@ -383,7 +383,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
 
     // Load declarative configuration
-    let config_path = "/etc/matic/node.yaml";
+    let config_path = "/etc/keel/node.yaml";
     let config = if std::path::Path::new(config_path).exists() {
         info!(path = config_path, "Loading configuration");
         keel_config::NodeConfig::load(config_path)?
@@ -397,9 +397,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(hostname = %config.hostname, "Configuration loaded");
 
     // mTLS setup
-    let cert_path = "/etc/matic/crypto/server.pem";
-    let key_path = "/etc/matic/crypto/server.key";
-    let ca_path = "/etc/matic/crypto/ca.pem";
+    let cert_path = "/etc/keel/crypto/server.pem";
+    let key_path = "/etc/keel/crypto/server.key";
+    let ca_path = "/etc/keel/crypto/ca.pem";
 
     let mut builder = Server::builder();
 

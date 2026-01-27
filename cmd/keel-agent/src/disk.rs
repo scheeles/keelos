@@ -294,7 +294,7 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
         "Boot partition switched"
     );
 
-    // Also update /etc/matic/boot.next as a software-level indicator (if writable)
+    // Also update /etc/keel/boot.next as a software-level indicator (if writable)
     let boot_marker = "/tmp/boot.next";
     if let Err(e) = fs::write(boot_marker, format!("{}", target_index)) {
         warn!(error = %e, "Could not write boot marker");
