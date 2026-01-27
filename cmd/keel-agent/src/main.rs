@@ -641,27 +641,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     info!(hostname = %config.hostname, "Configuration loaded");
 
-    // mTLS setup
-    let cert_path = "/etc/keel/crypto/server.pem";
-    let key_path = "/etc/keel/crypto/server.key";
-    let ca_path = "/etc/keel/crypto/ca.pem";
-
+    // mTLS setup - support both bootstrap and K8s CA certificates
     let mut builder = Server::builder();
 
-    if std::path::Path::new(cert_path).exists() {
+    // Try to load  server certificate and determine which CA to trust
+    let bootstrap_ca_path = "/etc/keel/crypto/bootstrap-ca.pem";
+    let k8s_ca_path = "/etc/keel/crypto/ca.pem";
+    let server_cert_path = "/etc/keel/crypto/server.pem";
+    let server_key_path = "/etc/keel/crypto/server.key";
+
+    if std::path::Path::new(server_cert_path).exists() {
         info!("Enabling mTLS");
-        let cert = std::fs::read_to_string(cert_path)?;
-        let key = std::fs::read_to_string(key_path)?;
-        let client_ca = std::fs::read_to_string(ca_path)?;
+        let cert = std::fs::read_to_string(server_cert_path)?;
+        let key = std::fs::read_to_string(server_key_path)?;
 
         let identity = tonic::transport::Identity::from_pem(cert, key);
-        let client_ca_cert = tonic::transport::Certificate::from_pem(client_ca);
 
-        let tls_config = tonic::transport::ServerTlsConfig::new()
-            .identity(identity)
-            .client_ca_root(client_ca_cert);
+        // Determine which CA to use: bootstrap (before K8s) or K8s (after join)
+        let is_bootstrapped = bootstrap::is_bootstrapped();
+        
+        if is_bootstrapped && std::path::Path::new(k8s_ca_path).exists() {
+            // After K8s join: use K8s CA
+            info!("Using Kubernetes CA for client authentication");
+            let k8s_ca = std::fs::read_to_string(k8s_ca_path)?;
+            let client_ca_cert = tonic::transport::Certificate::from_pem(k8s_ca);
 
-        builder = builder.tls_config(tls_config)?;
+            let tls_config = tonic::transport::ServerTlsConfig::new()
+                .identity(identity)
+                .client_ca_root(client_ca_cert);
+
+            builder = builder.tls_config(tls_config)?;
+        } else if std::path::Path::new(bootstrap_ca_path).exists() {
+            // Before K8s join: use bootstrap CA
+            info!("Using bootstrap CA for client authentication");
+            let bootstrap_ca = std::fs::read_to_string(bootstrap_ca_path)?;
+            let client_ca_cert = tonic::transport::Certificate::from_pem(bootstrap_ca);
+
+            let tls_config = tonic::transport::ServerTlsConfig::new()
+                .identity(identity)
+                .client_ca_root(client_ca_cert);
+
+            builder = builder.tls_config(tls_config)?;
+        } else {
+            warn!("No client CA certificate found - mTLS disabled");
+        }
     } else {
         warn!(
             cert_path = cert_path,
