@@ -130,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_addr = "0.0.0.0:9090".parse()?;
     let node_service = HelperNodeService::default();
 
-    info!(grpc_addr = %grpc_addr, health_addr = %health_addr, "Matic Agent starting");
+    info!(grpc_addr = %grpc_addr, "Matic Agent starting");
 
     // Load declarative configuration
     let config_path = "/etc/matic/node.yaml";
@@ -182,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_router = health::create_health_router(health_state);
 
     let health_server = tokio::spawn(async move {
-        info!(addr = %health_addr, "Starting health/metrics HTTP server");
+        info!("Starting health/metrics HTTP server");
         let listener = tokio::net::TcpListener::bind(health_addr)
             .await
             .expect("Failed to bind health server");
