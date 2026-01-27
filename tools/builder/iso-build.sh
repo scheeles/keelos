@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-# This script builds a bootable ISO image for MaticOS
+# This script builds a bootable ISO image for KeelOS
 # Must be run inside the builder container after kernel and initramfs are built
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 ISO_DIR="${BUILD_DIR}/iso"
-ISO_OUTPUT="${BUILD_DIR}/maticos.iso"
+ISO_OUTPUT="${BUILD_DIR}/keelos.iso"
 
 # Check required files exist
 if [ ! -f "${BUILD_DIR}/kernel/bzImage" ]; then
@@ -35,12 +35,12 @@ cat > "${ISO_DIR}/boot/grub/grub.cfg" << 'EOF'
 set default=0
 set timeout=5
 
-menuentry "MaticOS" {
+menuentry "KeelOS" {
     linux /boot/vmlinuz console=ttyS0,115200 console=tty0
     initrd /boot/initramfs.cpio.gz
 }
 
-menuentry "MaticOS (Debug Mode)" {
+menuentry "KeelOS (Debug Mode)" {
     linux /boot/vmlinuz console=ttyS0,115200 console=tty0 debug loglevel=7
     initrd /boot/initramfs.cpio.gz
 }

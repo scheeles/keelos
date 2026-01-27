@@ -16,7 +16,7 @@ if [ ! -f "${KERNEL}" ]; then
     echo "Warning: Kernel not found at ${KERNEL}. (Did you build it?)"
 fi
 
-echo ">>> Booting MaticOS in QEMU..."
+echo ">>> Booting KeelOS in QEMU..."
 qemu-system-x86_64 \
     -kernel "${KERNEL}" \
     -initrd "${INITRAMFS}" \

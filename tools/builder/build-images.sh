@@ -13,7 +13,7 @@ KERNEL="${BUILD_DIR}/kernel/bzImage"
 INITRAMFS="${BUILD_DIR}/initramfs.cpio.gz"
 DISK_IMG="${BUILD_DIR}/sda.img"
 
-echo ">>> Building MaticOS images (version: ${VERSION})..."
+echo ">>> Building KeelOS images (version: ${VERSION})..."
 
 # Verify source files exist
 for f in "$KERNEL" "$INITRAMFS" "$DISK_IMG"; do
@@ -29,9 +29,9 @@ done
 # =============================================================================
 echo ">>> Building ISO..."
 "${PROJECT_ROOT}/tools/builder/iso-build.sh"
-if [[ -f "${BUILD_DIR}/maticos.iso" ]]; then
-    mv "${BUILD_DIR}/maticos.iso" "${BUILD_DIR}/maticos-${VERSION}.iso"
-    echo "    Created: maticos-${VERSION}.iso"
+if [[ -f "${BUILD_DIR}/keelos.iso" ]]; then
+    mv "${BUILD_DIR}/keelos.iso" "${BUILD_DIR}/keelos-${VERSION}.iso"
+    echo "    Created: keelos-${VERSION}.iso"
 fi
 
 # =============================================================================
@@ -39,15 +39,15 @@ fi
 # =============================================================================
 echo ">>> Creating compressed RAW image..."
 # The sda.img is already a raw disk image, just compress it
-gzip -c "${DISK_IMG}" > "${BUILD_DIR}/maticos-${VERSION}.raw.gz"
-echo "    Created: maticos-${VERSION}.raw.gz"
+gzip -c "${DISK_IMG}" > "${BUILD_DIR}/keelos-${VERSION}.raw.gz"
+echo "    Created: keelos-${VERSION}.raw.gz"
 
 # =============================================================================
 # QCOW2 Image (KVM/libvirt)
 # =============================================================================
 echo ">>> Converting to QCOW2..."
-qemu-img convert -f raw -O qcow2 -c "${DISK_IMG}" "${BUILD_DIR}/maticos-${VERSION}.qcow2"
-echo "    Created: maticos-${VERSION}.qcow2"
+qemu-img convert -f raw -O qcow2 -c "${DISK_IMG}" "${BUILD_DIR}/keelos-${VERSION}.qcow2"
+echo "    Created: keelos-${VERSION}.qcow2"
 
 # =============================================================================
 # Kernel Bundle (for PXE/netboot)
@@ -56,9 +56,9 @@ echo ">>> Creating kernel bundle for PXE..."
 mkdir -p "${BUILD_DIR}/pxe"
 cp "${KERNEL}" "${BUILD_DIR}/pxe/vmlinuz"
 cp "${INITRAMFS}" "${BUILD_DIR}/pxe/initramfs.cpio.gz"
-tar -czvf "${BUILD_DIR}/maticos-${VERSION}-pxe.tar.gz" -C "${BUILD_DIR}/pxe" .
+tar -czvf "${BUILD_DIR}/keelos-${VERSION}-pxe.tar.gz" -C "${BUILD_DIR}/pxe" .
 rm -rf "${BUILD_DIR}/pxe"
-echo "    Created: maticos-${VERSION}-pxe.tar.gz"
+echo "    Created: keelos-${VERSION}-pxe.tar.gz"
 
 # =============================================================================
 # Summary
@@ -66,4 +66,4 @@ echo "    Created: maticos-${VERSION}-pxe.tar.gz"
 echo ""
 echo ">>> Build complete! Release artifacts:"
 echo ""
-ls -lh "${BUILD_DIR}"/maticos-${VERSION}*
+ls -lh "${BUILD_DIR}"/keelos-${VERSION}*

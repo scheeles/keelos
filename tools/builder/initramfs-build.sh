@@ -64,22 +64,22 @@ mkdir -p "${INITRAMFS_DIR}/etc/kubernetes/manifests"
 cp -L /usr/local/bin/kubelet "${INITRAMFS_DIR}/usr/bin/"
 cp -L "${PROJECT_ROOT}/tools/builder/kubelet-config.yaml" "${INITRAMFS_DIR}/etc/kubernetes/kubelet-config.yaml"
 
-echo ">>> Building matic-init..."
+echo ">>> Building keel-init..."
 # In a real scenario, this runs inside the docker container
-# cargo build --release --target x86_64-unknown-linux-musl --package matic-init
+# cargo build --release --target x86_64-unknown-linux-musl --package keel-init
 
 # Check if binary exists (assuming user ran build or we are mocking)
-if [ ! -f "${TARGET_DIR}/matic-init" ]; then
-    echo "ERROR: matic-init binary not found at ${TARGET_DIR}/matic-init"
+if [ ! -f "${TARGET_DIR}/keel-init" ]; then
+    echo "ERROR: keel-init binary not found at ${TARGET_DIR}/keel-init"
     echo "Please run: cargo build --release --target x86_64-unknown-linux-musl"
     exit 1
 else
-    echo "Copying matic-init to /init..."
-    cp "${TARGET_DIR}/matic-init" "${INITRAMFS_DIR}/init"
+    echo "Copying keel-init to /init..."
+    cp "${TARGET_DIR}/keel-init" "${INITRAMFS_DIR}/init"
 
-    if [ -f "${TARGET_DIR}/matic-agent" ]; then
-        echo "Copying matic-agent to /usr/bin/matic-agent..."
-        cp "${TARGET_DIR}/matic-agent" "${INITRAMFS_DIR}/usr/bin/matic-agent"
+    if [ -f "${TARGET_DIR}/keel-agent" ]; then
+        echo "Copying keel-agent to /usr/bin/keel-agent..."
+        cp "${TARGET_DIR}/keel-agent" "${INITRAMFS_DIR}/usr/bin/keel-agent"
     fi
 
     if [ -f "${TARGET_DIR}/osctl" ]; then

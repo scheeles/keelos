@@ -43,7 +43,7 @@ while true; do
     fi
 
     # Check for success - kubelet running is the best indicator of successful boot
-    # Kubelet only runs if matic-init started it successfully after containerd
+    # Kubelet only runs if keel-init started it successfully after containerd
     if grep -Eq "kubelet_node_status|NodeHasSufficientMemory|containerd.*grpc" "${LOG_FILE}"; then
         echo ">>> PASS: Boot successful in ${ELAPSED}s (kubelet running)"
         kill -9 $QEMU_PID 2>/dev/null
