@@ -15,12 +15,14 @@ use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
     BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
     CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
-    GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
-    GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
+    GetCaCertificateRequest, GetCaCertificateResponse, GetCertificateInfoRequest,
+    GetCertificateInfoResponse, GetHealthRequest, GetHealthResponse,
+    GetRollbackHistoryRequest, GetRollbackHistoryResponse, GetStatusRequest, GetStatusResponse,
+    GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
-    RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
-    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
-    UpdateSchedule as ProtoUpdateSchedule,
+    RebootResponse, RenewCertificateRequest, RenewCertificateResponse, RollbackEvent,
+    ScheduleUpdateRequest, ScheduleUpdateResponse, TriggerRollbackRequest,
+    TriggerRollbackResponse, UpdateProgress, UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -29,13 +31,16 @@ use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+
 mod disk;
 mod health;
 mod health_check;
 mod hooks;
 mod telemetry;
 mod update_scheduler;
+mod cert_manager;
 
+use cert_manager::{CertManager, CertManagerConfig};
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
 use update_scheduler::{ScheduleStatus, UpdateScheduler};
@@ -44,6 +49,7 @@ use update_scheduler::{ScheduleStatus, UpdateScheduler};
 pub struct HelperNodeService {
     scheduler: Arc<UpdateScheduler>,
     health_checker: Arc<HealthChecker>,
+    cert_manager: Arc<CertManager>,
 }
 
 #[tonic::async_trait]
@@ -407,6 +413,7 @@ impl NodeService for HelperNodeService {
         }))
     }
 
+
     async fn bootstrap_kubernetes(
         &self,
         request: Request<BootstrapKubernetesRequest>,
@@ -558,6 +565,77 @@ impl NodeService for HelperNodeService {
             bootstrapped_at: config.bootstrapped_at,
         }))
     }
+
+    async fn renew_certificate(
+        &self,
+        _request: Request<RenewCertificateRequest>,
+    ) -> Result<Response<RenewCertificateResponse>, Status> {
+        info!("Manual certificate renewal requested");
+
+        // Trigger certificate rotation
+        match self.cert_manager.rotate_server_certificate().await {
+            Ok(_) => {
+                info!("Certificate renewed successfully");
+
+                // Get new certificate info
+                let cert_pem = std::fs::read_to_string("/etc/keel/crypto/server.pem")
+                    .map_err(|e| Status::internal(format!("Failed to read new cert: {}", e)))?;
+
+                let expiry = keel_crypto::rotation::check_expiry(&cert_pem, 0)
+                    .map_err(|e| Status::internal(format!("Failed to check expiry: {}", e)))?;
+
+                Ok(Response::new(RenewCertificateResponse {
+                    success: true,
+                    message: "Certificate renewed successfully".to_string(),
+                    not_after: expiry.not_after.to_string(),
+                }))
+            }
+            Err(e) => {
+                error!(error = %e, "Certificate renewal failed");
+                Ok(Response::new(RenewCertificateResponse {
+                    success: false,
+                    message: format!("Certificate renewal failed: {}", e),
+                    not_after: String::new(),
+                }))
+            }
+        }
+    }
+
+    async fn get_certificate_info(
+        &self,
+        _request: Request<GetCertificateInfoRequest>,
+    ) -> Result<Response<GetCertificateInfoResponse>, Status> {
+        debug!("Get certificate info requested");
+
+        let cert_pem = std::fs::read_to_string("/etc/keel/crypto/server.pem")
+            .map_err(|e| Status::internal(format!("Failed to read certificate: {}", e)))?;
+
+        let expiry = keel_crypto::rotation::check_expiry(&cert_pem, 30)
+            .map_err(|e| Status::internal(format!("Failed to check expiry: {}", e)))?;
+
+        Ok(Response::new(GetCertificateInfoResponse {
+            common_name: "keel-agent".to_string(), // TODO: Extract from cert
+            not_before: expiry.not_before.to_string(),
+            not_after: expiry.not_after.to_string(),
+            days_until_expiry: expiry.days_until_expiry,
+            is_expiring_soon: expiry.is_expiring_soon,
+        }))
+    }
+
+    async fn get_ca_certificate(
+        &self,
+        _request: Request<GetCaCertificateRequest>,
+    ) -> Result<Response<GetCaCertificateResponse>, Status> {
+        debug!("Get CA certificate requested");
+
+        let ca_cert_pem = self
+            .cert_manager
+            .get_ca_cert_pem()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get CA cert: {}", e)))?;
+
+        Ok(Response::new(GetCaCertificateResponse { ca_cert_pem }))
+    }
 }
 
 #[tokio::main]
@@ -576,15 +654,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_config = HealthCheckerConfig::default();
     let health_checker = Arc::new(HealthChecker::new(health_config));
 
+    // Initialize certificate manager
+    let cert_config = CertManagerConfig::default();
+    let cert_manager = Arc::new(CertManager::new(cert_config));
+    if let Err(e) = cert_manager.initialize().await {
+        warn!(error = %e, "Failed to initialize certificate manager");
+    } else {
+        info!("Certificate manager initialized successfully");
+    }
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
     tokio::spawn(async move {
         schedule_executor(executor_scheduler).await;
     });
 
+    // Start certificate rotation monitor
+    let rotation_manager = cert_manager.clone();
+    tokio::spawn(async move {
+        rotation_manager.start_rotation_monitor().await;
+    });
+
     let node_service = HelperNodeService {
         scheduler: scheduler.clone(),
         health_checker: health_checker.clone(),
+        cert_manager: cert_manager.clone(),
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");

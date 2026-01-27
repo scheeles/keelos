@@ -35,6 +35,11 @@ service NodeService {
   
   // Get Kubernetes bootstrap status
   rpc GetBootstrapStatus (GetBootstrapStatusRequest) returns (GetBootstrapStatusResponse);
+  
+  // Certificate management
+  rpc RenewCertificate (RenewCertificateRequest) returns (RenewCertificateResponse);
+  rpc GetCertificateInfo (GetCertificateInfoRequest) returns (GetCertificateInfoResponse);
+  rpc GetCaCertificate (GetCaCertificateRequest) returns (GetCaCertificateResponse);
 }
 
 message InstallUpdateRequest {
@@ -232,3 +237,30 @@ message GetBootstrapStatusResponse {
   // Bootstrap timestamp (RFC3339)
   string bootstrapped_at = 5;
 }
+
+// Certificate management messages
+
+message RenewCertificateRequest {}
+
+message RenewCertificateResponse {
+  bool success = 1;
+  string message = 2;
+  string not_after = 3;  // New certificate expiry (RFC3339)
+}
+
+message GetCertificateInfoRequest {}
+
+message GetCertificateInfoResponse {
+  string common_name = 1;
+  string not_before = 2;  // RFC3339
+  string not_after = 3;   // RFC3339
+  int64 days_until_expiry = 4;
+  bool is_expiring_soon = 5;
+}
+
+message GetCaCertificateRequest {}
+
+message GetCaCertificateResponse {
+  string ca_cert_pem = 1;
+}
+

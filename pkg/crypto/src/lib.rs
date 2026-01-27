@@ -2,6 +2,9 @@
 //!
 //! Provides certificate loading and self-signed generation for mTLS.
 
+pub mod ca;
+pub mod rotation;
+
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use std::fs::File;
 use std::io::BufReader;

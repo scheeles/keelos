@@ -9,6 +9,12 @@ rustls-pemfile = "2.0"
 rcgen = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
+time = "0.3"
+pem = "3.0"
+x509-parser = "0.16"
+
+[dev-dependencies]
+tempfile = "3.8"
 
 [lib]
 name = "keel_crypto"
