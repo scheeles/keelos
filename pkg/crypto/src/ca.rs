@@ -44,8 +44,11 @@ impl CertificateAuthority {
         params.not_before = not_before;
         params.not_after = not_after;
 
-        // Use ECDSA P-256 signature algorithm
-        let ca_cert = Certificate::generate_self_signed(params)
+        // Generate key pair
+        let key_pair = KeyPair::generate().map_err(|e| CaError::CertGen(format!("Failed to generate key pair: {}", e)))?;
+
+        // Generate self-signed certificate
+        let ca_cert = params.self_signed(&key_pair)
             .map_err(|e| CaError::CertGen(format!("Failed to generate CA certificate: {}", e)))?;
 
         let ca_cert_pem = ca_cert.pem();
@@ -109,12 +112,19 @@ impl CertificateAuthority {
         params.not_before = not_before;
         params.not_after = not_after;
 
-        let cert = Certificate::generate(params, &self.ca_cert).map_err(|e| {
-            CaError::CertGen(format!("Failed to generate certificate: {}", e))
+        // Generate key pair for the new certificate
+        let key_pair = KeyPair::generate().map_err(|e| {
+            CaError::CertGen(format!("Failed to generate key pair: {}", e))
         })?;
 
+        // Sign the certificate with the CA
+        let cert = params.signed_by(&key_pair, &self.ca_cert, &self.ca_cert.key_pair())
+            .map_err(|e| {
+                CaError::CertGen(format!("Failed to generate certificate: {}", e))
+            })?;
+
         let cert_pem = cert.pem();
-        let key_pem = cert.key_pair().serialize_pem();
+        let key_pem = key_pair.serialize_pem();
 
         Ok((cert_pem, key_pem))
     }
