@@ -28,12 +28,21 @@ enum Commands {
     },
     /// Install an OS update
     Update {
-        /// Source URL of the SquashFS image
+        /// Source URL of the SquashFS image (or delta file if --delta is set)
         #[arg(long)]
         source: String,
         /// Expected SHA256 checksum
         #[arg(long)]
         sha256: Option<String>,
+        /// Use delta update (source is a delta file)
+        #[arg(long, default_value_t = false)]
+        delta: bool,
+        /// Enable fallback to full image if delta fails
+        #[arg(long, default_value_t = false)]
+        fallback: bool,
+        /// URL for full image (used as fallback if delta fails)
+        #[arg(long)]
+        full_image_url: Option<String>,
     },
     /// Get system health status
     Health,
@@ -97,17 +106,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let response = client.reboot(request).await?;
             println!("Reboot Scheduled: {:?}", response.into_inner().scheduled);
         }
-        Commands::Update { source, sha256 } => {
+        Commands::Update { source, sha256, delta, fallback, full_image_url } => {
             let request = tonic::Request::new(InstallUpdateRequest {
                 source_url: source.clone(),
                 expected_sha256: sha256.clone().unwrap_or_default(),
+                is_delta: *delta,
+                fallback_to_full: *fallback,
+                full_image_url: full_image_url.clone().unwrap_or_default(),
             });
             let mut stream = client.install_update(request).await?.into_inner();
             while let Some(progress) = stream.next().await {
                 let p = progress?;
-                println!("[{:>3}%] {}", p.percentage, p.message);
+                let phase_indicator = if !p.phase.is_empty() {
+                    format!(" [{}]", p.phase)
+                } else {
+                    String::new()
+                };
+                println!("[{:>3}%]{} {}", p.percentage, phase_indicator, p.message);
                 if p.success {
                     println!("Update complete!");
+                    if p.bytes_saved > 0 {
+                        let mb_saved = p.bytes_saved as f64 / (1024.0 * 1024.0);
+                        println!("💾 Bandwidth saved: {:.2} MB", mb_saved);
+                    }
                 }
             }
         }

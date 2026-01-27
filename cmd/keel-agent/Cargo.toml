@@ -36,3 +36,8 @@ tracing-opentelemetry = "0.22"
 sysinfo = "0.30"
 async-trait = "0.1"
 
+# Delta update support
+bsdiff = { workspace = true }
+tempfile = "3.0"
+
+

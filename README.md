@@ -21,6 +21,7 @@ KeelOS is an immutable, API-driven Linux distribution designed exclusively for h
 *   **/docs**: Documentation and API specifications.
 *   **/.ai-context**: Documentation for AI agents contributing to this repo.
 
+
 ## Quick Start
 
 ### Building
@@ -60,6 +61,19 @@ osctl rollback trigger --reason "Emergency recovery"
 View rollback history:
 ```bash
 osctl rollback history
+```
+
+Use delta updates to save bandwidth:
+```bash
+# Generate delta between versions (on build server)
+./tools/builder/generate-delta.sh os-v1.0.squashfs os-v1.1.squashfs update.delta
+
+# Apply delta update with automatic fallback
+osctl update \
+  --source http://update-server/update.delta \
+  --delta \
+  --fallback \
+  --full-image-url http://update-server/os-v1.1.squashfs
 ```
 
 ## Documentation
