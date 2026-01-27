@@ -30,7 +30,10 @@ service NodeService {
   // Get rollback history
   rpc GetRollbackHistory (GetRollbackHistoryRequest) returns (GetRollbackHistoryResponse);
   
-  // Bootstrap Kubernetes cluster joining
+  // Sign a client CSR with bootstrap CA (only available before K8s join)
+  rpc SignBootstrapCertificate (SignBootstrapCertificateRequest) returns (SignBootstrapCertificateResponse);
+  
+  // Bootstrap node to Kubernetes cluster
   rpc BootstrapKubernetes (BootstrapKubernetesRequest) returns (BootstrapKubernetesResponse);
   
   // Get Kubernetes bootstrap status
@@ -183,6 +186,20 @@ message RollbackEvent {
   string from_partition = 3;
   string to_partition = 4;
   bool automatic = 5;
+}
+
+// Bootstrap certificate signing messages
+
+message SignBootstrapCertificateRequest {
+  // Client's Certificate Signing Request in PEM format
+  string csr_pem = 1;
+}
+
+message SignBootstrapCertificateResponse {
+  // Signed client certificate in PEM format
+  string client_cert_pem = 1;
+  // Bootstrap CA certificate in PEM format
+  string ca_cert_pem = 2;
 }
 
 // Kubernetes Bootstrap messages
