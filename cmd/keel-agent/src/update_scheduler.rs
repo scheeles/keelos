@@ -301,10 +301,10 @@ mod tests {
                 true,
                 None,
                 None,
-                None, // post_update_hook
+                None,  // post_update_hook
                 false, // is_delta
                 false, // fallback_to_full
-                None, // full_image_url
+                None,  // full_image_url
             )
             .await
             .unwrap();
@@ -327,7 +327,7 @@ mod tests {
                 Some(Utc::now() + chrono::Duration::hours(1)),
                 Some(3600),
                 false,
-                None, // post_update_hook
+                None,  // post_update_hook
                 false, // is_delta
                 false, // fallback_to_full
                 None,  // full_image_url

@@ -31,13 +31,13 @@ use tracing::{debug, error, info, warn};
 mod disk;
 mod health;
 mod health_check;
+mod hooks;
 mod telemetry;
 mod update_scheduler;
-mod hooks;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
-use update_scheduler::{ScheduleStatus, UpdateScheduler};
 use hooks::execute_hook;
+use update_scheduler::{ScheduleStatus, UpdateScheduler};
 
 #[derive(Clone)]
 pub struct HelperNodeService {
@@ -256,7 +256,11 @@ impl NodeService for HelperNodeService {
                 post_hook,
                 req.is_delta,
                 req.fallback_to_full,
-                if req.full_image_url.is_empty() { None } else { Some(req.full_image_url) },
+                if req.full_image_url.is_empty() {
+                    None
+                } else {
+                    Some(req.full_image_url)
+                },
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to schedule update: {}", e)))?;
@@ -486,6 +490,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let listener = tokio::net::TcpListener::bind(health_addr)
             .await
             .expect("Failed to bind health server");
+        axum::serve(listener, health_router)
+            .await
             .expect("Health server failed");
     });
 
@@ -589,7 +595,10 @@ async fn execute_scheduled_update(
         &inactive.device,
         schedule.expected_sha256.as_deref(),
         schedule.is_delta,
-        schedule.fallback_to_full.then(|| schedule.full_image_url.as_deref()).flatten(), 
+        schedule
+            .fallback_to_full
+            .then(|| schedule.full_image_url.as_deref())
+            .flatten(),
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -598,7 +607,6 @@ async fn execute_scheduled_update(
     if let Some(hook) = &schedule.post_update_hook {
         execute_hook(hook, "post-update").await?;
     }
-
 
     // Switch boot partition
     disk::switch_boot_partition(inactive.index).map_err(|e| e.to_string())?;
@@ -609,7 +617,7 @@ async fn execute_scheduled_update(
 /// Rollback supervisor checks health after boot and triggers rollback if critical
 async fn start_rollback_supervisor(health: Arc<HealthChecker>) {
     use tokio::time::{sleep, Duration};
-    
+
     // Allow system to stabilize (initial grace period)
     info!("Rollback supervisor started - waiting for system stability (60s)");
     sleep(Duration::from_secs(60)).await;
@@ -619,18 +627,18 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>) {
 
     // Run critical check
     let (status, _) = health.run_all_checks().await;
-    
+
     if status == health_check::HealthStatus::Unhealthy {
         error!(status = %status, "Critical health failure detected!");
-        
+
         warn!("Initiating AUTOMATIC ROLLBACK due to critical health failure");
         match disk::rollback_to_previous_partition() {
-           Ok(_) => {
-               error!("Rollback successful - rebooting system...");
-               // Force reboot (in real system, would involve syscall/init)
-               let _ = std::process::Command::new("reboot").status();
-           },
-           Err(e) => error!(error = %e, "Automatic rollback FAILED"),
+            Ok(_) => {
+                error!("Rollback successful - rebooting system...");
+                // Force reboot (in real system, would involve syscall/init)
+                let _ = std::process::Command::new("reboot").status();
+            }
+            Err(e) => error!(error = %e, "Automatic rollback FAILED"),
         }
     } else {
         info!("System health verified stable.");
