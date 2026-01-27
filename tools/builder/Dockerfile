@@ -27,6 +27,8 @@ RUN apt-get update && apt-get install -y \
     qemu-utils \
     xorriso \
     mtools \
+    cmake \
+    clang \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GRUB only on x86_64 (not available on ARM)
