@@ -21,26 +21,6 @@ KeelOS is an immutable, API-driven Linux distribution designed exclusively for h
 *   **/docs**: Documentation and API specifications.
 *   **/.ai-context**: Documentation for AI agents contributing to this repo.
 
-## Features
-
-### ✅ Phase 1: Update Scheduling (Complete)
-- Scheduled OS updates with maintenance windows
-- Pre/post-update hooks for custom workflows  
-- Persistent schedule tracking across reboots
-- gRPC API for update management
-
-### ✅ Phase 2: Automatic Rollback (Complete)
-- **Health Check Framework**: Pluggable health checks (boot, service, network, API)
-- **Automatic Rollback**: Failed health checks trigger automatic partition rollback
-- **Boot Loop Protection**: Detects boot loops and prevents infinite rollback cycles
-- **Manual Rollback**: Emergency rollback via CLI or API
-- **Rollback History**: Audit trail of all rollback events
-
-### 🚧 Phase 3: Delta Updates (Planned)
-- Binary diff generation for efficient updates
-- Reduced bandwidth usage
-- Incremental update support
-
 ## Quick Start
 
 ### Building
@@ -84,10 +64,12 @@ osctl rollback history
 
 ## Documentation
 
-- [Getting Started Guide](docs/getting-started.md)
-- [Architecture Overview](docs/architecture.md)
-- [Health Check and Rollback API](docs/api/health-and-rollback.md)
-- [Using osctl](docs/using-osctl.md)
+- **[Overview](docs/overview/what-is-keelos.md)**: Introduction, Philosophy, and Security.
+- **[Getting Started](docs/getting-started/quickstart-qemu.md)**: Run KeelOS locally in QEMU.
+- **[Core Concepts](docs/learn-more/architecture.md)**: Architecture, API-Management, and Immutability.
+- **[Operational Guides](docs/operational-guides/lifecycle-management.md)**: Updates, Rollbacks, and Configuration.
+- **[Platform Installation](docs/platform-installation/local-qemu.md)**: Installation guides for Local, Bare Metal, and Cloud.
+- **[Reference](docs/reference/osctl.md)**: CLI and API Reference.
 
 ## Development
 
