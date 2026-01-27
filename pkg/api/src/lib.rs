@@ -1,3 +1,3 @@
 pub mod node {
-    tonic::include_proto!("matic.v1");
+    tonic::include_proto!("keel.v1");
 }

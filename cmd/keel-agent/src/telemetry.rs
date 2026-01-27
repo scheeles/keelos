@@ -1,4 +1,4 @@
-//! OpenTelemetry telemetry integration for matic-agent
+//! OpenTelemetry telemetry integration for keel-agent
 //!
 //! This module initializes and configures OpenTelemetry for:
 //! - Distributed tracing

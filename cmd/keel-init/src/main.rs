@@ -310,15 +310,15 @@ fn supervise_services() -> Result<(), InitError> {
     info!("Starting containerd");
     let mut containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
 
-    // Start matic-agent
-    info!("Starting matic-agent");
-    let mut agent = spawn_service("matic-agent", "/usr/bin/matic-agent", &[]);
+    // Start keel-agent
+    info!("Starting keel-agent");
+    let mut agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
 
     // Start kubelet (with override support)
     info!("Starting kubelet");
-    let kubelet_path = if std::path::Path::new("/var/lib/matic/bin/kubelet").exists() {
-        info!("Using override kubelet from /var/lib/matic/bin/kubelet");
-        "/var/lib/matic/bin/kubelet"
+    let kubelet_path = if std::path::Path::new("/var/lib/keel/bin/kubelet").exists() {
+        info!("Using override kubelet from /var/lib/keel/bin/kubelet");
+        "/var/lib/keel/bin/kubelet"
     } else {
         "/usr/bin/kubelet"
     };
@@ -348,12 +348,12 @@ fn supervise_services() -> Result<(), InitError> {
             }
         }
 
-        // Check matic-agent - restart with backoff
+        // Check keel-agent - restart with backoff
         if let Some(ref mut child) = agent {
             if let Ok(Some(status)) = child.try_wait() {
                 let delay = std::cmp::min(1u64 << agent_restart_count, max_restart_delay_secs);
                 warn!(
-                    service = "matic-agent",
+                    service = "keel-agent",
                     exit_status = %status,
                     attempt = agent_restart_count + 1,
                     backoff_secs = delay,
@@ -362,7 +362,7 @@ fn supervise_services() -> Result<(), InitError> {
 
                 thread::sleep(time::Duration::from_secs(delay));
 
-                agent = spawn_service("matic-agent", "/usr/bin/matic-agent", &[]);
+                agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
                 if agent.is_some() {
                     agent_restart_count = agent_restart_count.saturating_add(1);
                 }

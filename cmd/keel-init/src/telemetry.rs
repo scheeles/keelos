@@ -1,4 +1,4 @@
-//! Boot-time telemetry tracking for matic-init
+//! Boot-time telemetry tracking for keel-init
 //!
 //! This module tracks boot phase durations and exports metrics
 //! for the agent to report.

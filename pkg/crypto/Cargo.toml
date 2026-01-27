@@ -1,5 +1,5 @@
 [package]
-name = "matic-crypto"
+name = "keel-crypto"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,5 +11,5 @@ serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 
 [lib]
-name = "matic_crypto"
+name = "keel_crypto"
 path = "src/lib.rs"

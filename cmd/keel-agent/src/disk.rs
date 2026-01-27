@@ -304,7 +304,7 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
 }
 
 /// State file for tracking rollback information
-const ROLLBACK_STATE_FILE: &str = "/var/lib/matic/rollback_state.json";
+const ROLLBACK_STATE_FILE: &str = "/var/lib/keel/rollback_state.json";
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct RollbackState {

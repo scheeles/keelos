@@ -1,8 +1,8 @@
 [workspace]
 members = [
-    "cmd/matic-init",
+    "cmd/keel-init",
     "pkg/api",
-    "cmd/matic-agent",
+    "cmd/keel-agent",
     "cmd/osctl",
     "pkg/crypto",
     "pkg/config",

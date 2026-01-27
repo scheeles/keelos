@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use matic_api::node::node_service_client::NodeServiceClient;
-use matic_api::node::{
+use keel_api::node::node_service_client::NodeServiceClient;
+use keel_api::node::{
     GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest,
     RebootRequest, TriggerRollbackRequest,
 };
