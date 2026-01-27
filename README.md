@@ -76,6 +76,24 @@ osctl update \
   --full-image-url http://update-server/os-v1.1.squashfs
 ```
 
+Join a Kubernetes cluster:
+```bash
+# Create bootstrap token on control plane
+kubectl create token node-bootstrapper --duration=24h --namespace=kube-system
+
+# Extract CA certificate
+kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > ca.crt
+
+# Bootstrap the node
+osctl bootstrap \
+  --api-server https://k8s.example.com:6443 \
+  --token <bootstrap-token> \
+  --ca-cert ca.crt
+
+# Verify node joined
+kubectl get nodes
+```
+
 ## Documentation
 
 - **[Overview](docs/overview/what-is-keelos.md)**: Introduction, Philosophy, and Security.
