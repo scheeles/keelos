@@ -4,7 +4,7 @@ set -e
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 
-echo ">>> Verifying MaticOS Build Artifacts..."
+echo ">>> Verifying KeelOS Build Artifacts..."
 
 # 1. Check if files exist
 artifacts=(
@@ -37,7 +37,7 @@ if [ -d "${BUILD_DIR}/initramfs" ]; then
     }
 
     check_arch "${BUILD_DIR}/initramfs/init"
-    check_arch "${BUILD_DIR}/initramfs/usr/bin/matic-agent"
+    check_arch "${BUILD_DIR}/initramfs/usr/bin/keel-agent"
 fi
 
 echo ">>> ALL PHASE 1 & 2 ARTIFACTS VERIFIED <<<"

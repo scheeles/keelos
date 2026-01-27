@@ -1,9 +1,9 @@
-name: Release MaticOS
+name: Release KeelOS
 
 on:
   push:
     tags:
-      - 'maticos-v*'
+      - 'keelos-v*'
   workflow_dispatch:
     inputs:
       version:
@@ -28,8 +28,8 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
-            # Extract version from tag (maticos-v0.1.0 -> 0.1.0)
-            VERSION="${GITHUB_REF#refs/tags/maticos-v}"
+            # Extract version from tag (keelos-v0.1.0 -> 0.1.0)
+            VERSION="${GITHUB_REF#refs/tags/keelos-v}"
             echo "version=${VERSION}" >> $GITHUB_OUTPUT
           fi
 
@@ -71,7 +71,7 @@ jobs:
           context: ./tools/builder
           push: false
           load: true
-          tags: maticos-builder:latest
+          tags: keelos-builder:latest
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -84,20 +84,20 @@ jobs:
         run: |
           mkdir -p target .cache/kernel build
           docker run --rm \
-            -v ${{ github.workspace }}:/maticos \
+            -v ${{ github.workspace }}:/keelos \
             -v ~/.cargo/registry:/root/.cargo/registry \
             -v ~/.cargo/git:/root/.cargo/git \
             --privileged \
-            maticos-builder:latest \
-            /maticos/tools/ci-build-only.sh
+            keelos-builder:latest \
+            /keelos/tools/ci-build-only.sh
 
       - name: Build Release Images
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}:/maticos \
+            -v ${{ github.workspace }}:/keelos \
             --privileged \
-            maticos-builder:latest \
-            /maticos/tools/builder/build-images.sh ${{ steps.version.outputs.version }}
+            keelos-builder:latest \
+            /keelos/tools/builder/build-images.sh ${{ steps.version.outputs.version }}
 
       - name: Fix Permissions
         if: always()
@@ -107,29 +107,29 @@ jobs:
       - name: Upload ISO
         uses: actions/upload-artifact@v4
         with:
-          name: maticos-iso
-          path: build/maticos-*.iso
+          name: keelos-iso
+          path: build/keelos-*.iso
           retention-days: 7
 
       - name: Upload RAW
         uses: actions/upload-artifact@v4
         with:
-          name: maticos-raw
-          path: build/maticos-*.raw.gz
+          name: keelos-raw
+          path: build/keelos-*.raw.gz
           retention-days: 7
 
       - name: Upload QCOW2
         uses: actions/upload-artifact@v4
         with:
-          name: maticos-qcow2
-          path: build/maticos-*.qcow2
+          name: keelos-qcow2
+          path: build/keelos-*.qcow2
           retention-days: 7
 
       - name: Upload PXE Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: maticos-pxe
-          path: build/maticos-*-pxe.tar.gz
+          name: keelos-pxe
+          path: build/keelos-*-pxe.tar.gz
           retention-days: 7
 
   release:
@@ -163,7 +163,7 @@ jobs:
             release/*
           generate_release_notes: true
           body: |
-            ## MaticOS ${{ needs.build.outputs.version }}
+            ## KeelOS ${{ needs.build.outputs.version }}
             
             ### Download Options
             

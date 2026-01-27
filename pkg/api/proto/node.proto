@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package matic.v1;
+package keel.v1;
 
 service NodeService {
   // Get system health and status

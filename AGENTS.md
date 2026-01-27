@@ -1,10 +1,10 @@
 # AGENTS.md
 
-> Guidance for AI agents contributing to MaticOS.
+> Guidance for AI agents contributing to KeelOS.
 
 ## Project Overview
 
-MaticOS is an immutable, API-driven Linux distribution designed exclusively for hosting Kubernetes workloads. It replaces the traditional userspace (Shell, SSH, Systemd) with a single-binary PID 1 (`matic-init`) and a gRPC-based management API (`matic-agent`).
+KeelOS is an immutable, API-driven Linux distribution designed exclusively for hosting Kubernetes workloads. It replaces the traditional userspace (Shell, SSH, Systemd) with a single-binary PID 1 (`keel-init`) and a gRPC-based management API (`keel-agent`).
 
 Key characteristics:
 - **Immutable**: Read-only SquashFS image with atomic A/B partition updates
@@ -18,7 +18,7 @@ Key characteristics:
 |-----------|---------|
 | `/kernel` | Minimalist Linux kernel configuration and patches |
 | `/pkg` | Shared Rust/Go libraries for OS components |
-| `/cmd` | Binaries: `matic-init`, `matic-agent`, `osctl` |
+| `/cmd` | Binaries: `keel-init`, `keel-agent`, `osctl` |
 | `/crates` | Rust workspace crates |
 | `/system` | Static manifests and bootstrap configuration |
 | `/tools` | Build systems and test harnesses |
@@ -29,7 +29,7 @@ Key characteristics:
 
 1. **Read the Style Guide First**: Always review [`.ai-context/STYLE_GUIDE.md`](./.ai-context/STYLE_GUIDE.md) before making changes.
 
-2. **No Panics in PID 1**: The `matic-init` binary is PID 1 and **must never panic**. Always use `Result<T, E>` with proper error handling.
+2. **No Panics in PID 1**: The `keel-init` binary is PID 1 and **must never panic**. Always use `Result<T, E>` with proper error handling.
 
 3. **Static Linking**: All binaries must be statically linked using `x86_64-unknown-linux-musl`.
 
@@ -72,7 +72,7 @@ Claude will provide feedback on the PR and may request changes before approval.
 - Formatter: `rustfmt` with defaults
 - Lints: Must pass `clippy::pedantic`
 - No `unwrap()` or `expect()` in runtime code; use `?` operator
-- Async: Use `tokio` for the Agent; keep `matic-init` synchronous
+- Async: Use `tokio` for the Agent; keep `keel-init` synchronous
 
 ### Commit Messages
 Follow [Conventional Commits](https://www.conventionalcommits.org/):

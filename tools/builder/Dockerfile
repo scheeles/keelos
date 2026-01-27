@@ -32,8 +32,8 @@ RUN apt-get update && apt-get install -y \
 # Install GRUB only on x86_64 (not available on ARM)
 RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
     apt-get update && apt-get install -y \
-        grub-pc-bin \
-        grub-efi-amd64-bin \
+    grub-pc-bin \
+    grub-efi-amd64-bin \
     && rm -rf /var/lib/apt/lists/*; \
     fi
 
@@ -72,4 +72,4 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Install musl target for cross-compilation
 RUN rustup target add x86_64-unknown-linux-musl
 
-WORKDIR /maticos
+WORKDIR /keelos

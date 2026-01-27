@@ -1,20 +1,20 @@
-# Installing MaticOS
+# Installing KeelOS
 
-This guide covers installing MaticOS from pre-built release images.
+This guide covers installing KeelOS from pre-built release images.
 
 > [!TIP]
-> If you want to build MaticOS from source instead, see [Getting Started](./getting-started.md).
+> If you want to build KeelOS from source instead, see [Getting Started](./getting-started.md).
 
 ## Download Release Images
 
-Download the latest release from [GitHub Releases](https://github.com/scheeles/maticos/releases).
+Download the latest release from [GitHub Releases](https://github.com/scheeles/keelos/releases).
 
 | Format | Use Case | File |
 |--------|----------|------|
-| **ISO** | Bootable installer, live boot, bare metal | `maticos-<version>.iso` |
-| **RAW** | Cloud VMs, generic hypervisors | `maticos-<version>.raw.gz` |
-| **QCOW2** | KVM / libvirt | `maticos-<version>.qcow2` |
-| **PXE** | Network boot | `maticos-<version>-pxe.tar.gz` |
+| **ISO** | Bootable installer, live boot, bare metal | `keelos-<version>.iso` |
+| **RAW** | Cloud VMs, generic hypervisors | `keelos-<version>.raw.gz` |
+| **QCOW2** | KVM / libvirt | `keelos-<version>.qcow2` |
+| **PXE** | Network boot | `keelos-<version>-pxe.tar.gz` |
 
 ### Verify Downloads
 
@@ -30,13 +30,13 @@ sha256sum -c SHA256SUMS
 
 1. Create a bootable USB or mount the ISO in your VM
 2. Boot from the ISO
-3. Select "MaticOS" from the GRUB menu
+3. Select "KeelOS" from the GRUB menu
 
 ### Testing in QEMU
 
 ```bash
 qemu-system-x86_64 \
-  -cdrom maticos-0.1.0.iso \
+  -cdrom keelos-0.1.0.iso \
   -m 2G \
   -smp 2 \
   -serial stdio
@@ -50,14 +50,14 @@ qemu-system-x86_64 \
 
 ```bash
 # Download QCOW2 image
-wget https://github.com/scheeles/maticos/releases/download/maticos-v0.1.0/maticos-0.1.0.qcow2
+wget https://github.com/scheeles/keelos/releases/download/keelos-v0.1.0/keelos-0.1.0.qcow2
 
 # Create VM
 virt-install \
-  --name maticos-node1 \
+  --name keelos-node1 \
   --memory 2048 \
   --vcpus 2 \
-  --disk path=maticos-0.1.0.qcow2,format=qcow2 \
+  --disk path=keelos-0.1.0.qcow2,format=qcow2 \
   --import \
   --os-variant linux2024 \
   --network bridge=virbr0 \
@@ -69,8 +69,8 @@ virt-install \
 
 ```bash
 # Create a VM definition
-virsh define maticos-vm.xml
-virsh start maticos-node1
+virsh define keelos-vm.xml
+virsh start keelos-node1
 ```
 
 ---
@@ -79,8 +79,8 @@ virsh start maticos-node1
 
 1. Upload the RAW image to Proxmox storage:
    ```bash
-   gunzip maticos-0.1.0.raw.gz
-   qm importdisk <vmid> maticos-0.1.0.raw local-lvm
+   gunzip keelos-0.1.0.raw.gz
+   qm importdisk <vmid> keelos-0.1.0.raw local-lvm
    ```
 
 2. Attach the disk to your VM and set it as the boot device.
@@ -91,7 +91,7 @@ virsh start maticos-node1
 
 Extract the PXE bundle:
 ```bash
-tar -xzf maticos-0.1.0-pxe.tar.gz
+tar -xzf keelos-0.1.0-pxe.tar.gz
 ```
 
 Contents:
@@ -110,8 +110,8 @@ tftp-root=/srv/tftp
 
 Create `/srv/tftp/pxelinux.cfg/default`:
 ```
-DEFAULT maticos
-LABEL maticos
+DEFAULT keelos
+LABEL keelos
   KERNEL vmlinuz
   APPEND initrd=initramfs.cpio.gz console=ttyS0,115200
 ```
@@ -131,10 +131,10 @@ LABEL maticos
 
 ## First Boot
 
-After booting MaticOS:
+After booting KeelOS:
 
 1. The system starts automatically (no login required)
-2. `matic-agent` listens on port `50051`
+2. `keel-agent` listens on port `50051`
 3. Use `osctl` to manage the node remotely
 
 ```bash
@@ -150,9 +150,9 @@ See [Using osctl](./using-osctl.md) for complete CLI reference.
 ### System doesn't boot
 
 - Ensure UEFI/BIOS is configured for the correct boot mode
-- Try the "MaticOS (Debug Mode)" option from the GRUB menu for verbose output
+- Try the "KeelOS (Debug Mode)" option from the GRUB menu for verbose output
 
-### Can't connect to matic-agent
+### Can't connect to keel-agent
 
 - Verify the node's IP address
 - Check that port 50051 is not blocked by a firewall

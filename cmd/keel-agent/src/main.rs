@@ -1,4 +1,4 @@
-//! MaticOS Agent - gRPC management server
+//! KeelOS Agent - gRPC management server
 //!
 //! The Matic Agent provides a gRPC API for managing the node, including:
 //! - Node status queries
@@ -11,8 +11,8 @@
 //! - /readyz - Readiness checks
 //! - /metrics - Prometheus metrics
 
-use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
-use matic_api::node::{
+use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
+use keel_api::node::{
     CancelScheduledUpdateRequest, CancelScheduledUpdateResponse, GetHealthRequest,
     GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse, GetStatusRequest,
     GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
@@ -51,7 +51,7 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetStatusResponse>, Status> {
         debug!("Received get_status request");
         let reply = GetStatusResponse {
-            hostname: "matic-node".to_string(),   // TODO: Get from hostname
+            hostname: "keel-node".to_string(),   // TODO: Get from hostname
             kernel_version: "6.6.14".to_string(), // TODO: Get from uname
             os_version: "0.1.0".to_string(),
             uptime_seconds: 0.0, // TODO: Get from /proc/uptime
@@ -357,13 +357,13 @@ impl NodeService for HelperNodeService {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize OpenTelemetry telemetry
     let otlp_endpoint = std::env::var("OTLP_ENDPOINT").ok();
-    telemetry::init_telemetry("matic-agent", otlp_endpoint)?;
+    telemetry::init_telemetry("keel-agent", otlp_endpoint)?;
 
     let grpc_addr: std::net::SocketAddr = "0.0.0.0:50051".parse()?;
     let health_addr: std::net::SocketAddr = "0.0.0.0:9090".parse()?;
 
     // Initialize update scheduler
-    let scheduler = Arc::new(UpdateScheduler::new("/var/lib/matic/update-schedule.json"));
+    let scheduler = Arc::new(UpdateScheduler::new("/var/lib/keel/update-schedule.json"));
 
     // Initialize health checker
     let health_config = HealthCheckerConfig::default();
@@ -383,23 +383,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
 
     // Load declarative configuration
-    let config_path = "/etc/matic/node.yaml";
+    let config_path = "/etc/keel/node.yaml";
     let config = if std::path::Path::new(config_path).exists() {
         info!(path = config_path, "Loading configuration");
-        matic_config::NodeConfig::load(config_path)?
+        keel_config::NodeConfig::load(config_path)?
     } else {
         warn!(
             path = config_path,
             "Configuration not found, using defaults"
         );
-        matic_config::NodeConfig::default_config()
+        keel_config::NodeConfig::default_config()
     };
     info!(hostname = %config.hostname, "Configuration loaded");
 
     // mTLS setup
-    let cert_path = "/etc/matic/crypto/server.pem";
-    let key_path = "/etc/matic/crypto/server.key";
-    let ca_path = "/etc/matic/crypto/ca.pem";
+    let cert_path = "/etc/keel/crypto/server.pem";
+    let key_path = "/etc/keel/crypto/server.key";
+    let ca_path = "/etc/keel/crypto/ca.pem";
 
     let mut builder = Server::builder();
 
@@ -541,8 +541,8 @@ async fn execute_scheduled_update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matic_api::node::node_service_server::NodeService;
-    use matic_api::node::GetStatusRequest;
+    use keel_api::node::node_service_server::NodeService;
+    use keel_api::node::GetStatusRequest;
 
     #[tokio::test]
     async fn test_get_status() {
@@ -556,7 +556,7 @@ mod tests {
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
 
-        assert_eq!(inner.hostname, "matic-node");
+        assert_eq!(inner.hostname, "keel-node");
         assert_eq!(inner.os_version, "0.1.0");
     }
 }

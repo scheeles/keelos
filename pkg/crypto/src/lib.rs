@@ -1,4 +1,4 @@
-//! Cryptography utilities for MaticOS
+//! Cryptography utilities for KeelOS
 //!
 //! Provides certificate loading and self-signed generation for mTLS.
 

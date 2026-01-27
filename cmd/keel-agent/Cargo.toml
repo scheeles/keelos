@@ -1,12 +1,12 @@
 [package]
-name = "matic-agent"
+name = "keel-agent"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-matic-api = { path = "../../pkg/api" }
-matic-crypto = { path = "../../pkg/crypto" }
-matic-config = { path = "../../pkg/config" }
+keel-api = { path = "../../pkg/api" }
+keel-crypto = { path = "../../pkg/crypto" }
+keel-config = { path = "../../pkg/config" }
 # HTTP server for health/metrics endpoints
 axum = "0.7"
 tower = "0.4"

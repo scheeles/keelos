@@ -1,6 +1,6 @@
-# MaticOS Coding Standards
+# KeelOS Coding Standards
 
-This document defines the rules for contributing to MaticOS.
+This document defines the rules for contributing to KeelOS.
 
 ## General Principles
 
@@ -20,7 +20,7 @@ This document defines the rules for contributing to MaticOS.
 *   **Error Handling**:
     *   ❌ `unwrap()` or `expect()` in runtime code.
     *   ✅ `?` operator or explicit matching.
-*   **Async**: Use `tokio` for the Agent. `matic-init` should remain synchronous where possible for simplicity, or use a minimal executor if needed.
+*   **Async**: Use `tokio` for the Agent. `keel-init` should remain synchronous where possible for simplicity, or use a minimal executor if needed.
 
 ## Testing Guidelines
 

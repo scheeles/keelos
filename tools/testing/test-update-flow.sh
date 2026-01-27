@@ -11,11 +11,11 @@ echo ">>> Starting Phase 5 Update Test..."
 
 # 1. Setup Disk and Initramfs
 docker run --rm \
-    -v "${PROJECT_ROOT}:/maticos" \
-    -v "maticos-cargo-cache:/root/.cargo/registry" \
-    -v "maticos-target-cache:/maticos/target" \
-    maticos-builder \
-    /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package matic-init && cargo build --release --target x86_64-unknown-linux-musl --package matic-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
+    -v "${PROJECT_ROOT}:/keelos" \
+    -v "keelos-cargo-cache:/root/.cargo/registry" \
+    -v "keelos-target-cache:/keelos/target" \
+    keelos-builder \
+    /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package keel-init && cargo build --release --target x86_64-unknown-linux-musl --package keel-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
 
 # 2. Prepare Dummy Update Image
 echo "Creating dummy update image..."
@@ -32,15 +32,15 @@ cd -
 # Ensure server is killed on exit
 trap "kill $SERVER_PID || true" EXIT
 
-# 4. Boot MaticOS in background
-echo "Booting MaticOS in TEST MODE..."
+# 4. Boot KeelOS in background
+echo "Booting KeelOS in TEST MODE..."
 export EXTRA_APPEND="test_update=1"
 nohup "${PROJECT_ROOT}/tools/testing/run-qemu.sh" > "${LOG_FILE}" 2>&1 &
 QEMU_PID=$!
 trap "kill $QEMU_PID || true; kill $SERVER_PID || true" EXIT
 
 echo "Waiting for Matic Agent and in-VM test..."
-# Wait longer for the 15s delay in matic-init
+# Wait longer for the 15s delay in keel-init
 START_TIME=$(date +%s)
 while true; do
     if grep -q "in-VM update test finished" "${LOG_FILE}"; then

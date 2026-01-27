@@ -1,4 +1,4 @@
-//! Disk management for MaticOS A/B partition updates
+//! Disk management for KeelOS A/B partition updates
 //!
 //! This module handles:
 //! - Detecting active/inactive partitions
@@ -22,7 +22,7 @@ pub struct PartitionInfo {
     pub index: u32,
 }
 
-/// Default disk device for MaticOS
+/// Default disk device for KeelOS
 const DEFAULT_DISK: &str = "/dev/sda";
 
 /// Partition indices for A/B slots
@@ -294,7 +294,7 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
         "Boot partition switched"
     );
 
-    // Also update /etc/matic/boot.next as a software-level indicator (if writable)
+    // Also update /etc/keel/boot.next as a software-level indicator (if writable)
     let boot_marker = "/tmp/boot.next";
     if let Err(e) = fs::write(boot_marker, format!("{}", target_index)) {
         warn!(error = %e, "Could not write boot marker");
@@ -304,7 +304,7 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
 }
 
 /// State file for tracking rollback information
-const ROLLBACK_STATE_FILE: &str = "/var/lib/matic/rollback_state.json";
+const ROLLBACK_STATE_FILE: &str = "/var/lib/keel/rollback_state.json";
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 struct RollbackState {

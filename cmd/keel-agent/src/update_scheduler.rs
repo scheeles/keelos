@@ -1,4 +1,4 @@
-//! Update scheduler for MaticOS
+//! Update scheduler for KeelOS
 //!
 //! Handles scheduling updates for future execution with:
 //! - Persistent schedule storage

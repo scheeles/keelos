@@ -1,21 +1,21 @@
-# MaticOS
+# KeelOS
 
 > **A Next-Generation, "No-General-Purpose-OS" for Kubernetes Nodes.**
 
-MaticOS is an immutable, API-driven Linux distribution designed exclusively for hosting Kubernetes workloads. It eliminates the traditional userspace (Shell, SSH, Systemd) in favor of a single-binary PID 1 and a gRPC-based management API.
+KeelOS is an immutable, API-driven Linux distribution designed exclusively for hosting Kubernetes workloads. It eliminates the traditional userspace (Shell, SSH, Systemd) in favor of a single-binary PID 1 and a gRPC-based management API.
 
 ## Philosophy
 
 1.  **Immutable**: The OS is a read-only SquashFS image. Updates are atomic A/B partition swaps.
 2.  **API-Driven**: No SSH. No Console. All management happens via authenticated gRPC calls.
-3.  **Minimalist**: Under 100MB. Only the kernel, `matic-init`, `matic-agent`, `containerd`, and `kubelet`.
+3.  **Minimalist**: Under 100MB. Only the kernel, `keel-init`, `keel-agent`, `containerd`, and `kubelet`.
 4.  **Secure**: mTLS everywhere. Kernel lockdown. No interpreters (Python/Perl).
 
 ## Directory Structure
 
 *   **/kernel**: Minimalist Linux Kernel configuration and patches.
 *   **/pkg**: Shared Go/Rust libraries for the OS components.
-*   **/cmd**: Binaries (`matic-init`, `matic-agent`, `osctl`).
+*   **/cmd**: Binaries (`keel-init`, `keel-agent`, `osctl`).
 *   **/system**: Static manifests and bootstrap configuration.
 *   **/tools**: Build systems and test harnesses.
 *   **/docs**: Documentation and API specifications.
@@ -98,8 +98,8 @@ Run integration tests:
 
 Build individual components:
 ```bash
-# Build matic-agent
-cargo build --package matic-agent
+# Build keel-agent
+cargo build --package keel-agent
 
 # Build osctl CLI
 cargo build --package osctl

@@ -53,7 +53,7 @@ jobs:
           claude_args: |
             --model claude-opus-4-1-20250805
             --max-turns 8
-            --system-prompt "You are a documentation expert for MaticOS. A PR has just been merged with the following changes:
+            --system-prompt "You are a documentation expert for KeelOS. A PR has just been merged with the following changes:
             
             Changed files:
             ${{ steps.changed-files.outputs.files }}

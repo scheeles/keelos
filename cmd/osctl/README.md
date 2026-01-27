@@ -1,13 +1,13 @@
 # osctl
 
-The Command Line Interface for administering MaticOS nodes.
+The Command Line Interface for administering KeelOS nodes.
 
 **Status**: Alpha
 **Language**: Rust
 
 ## Overview
 
-`osctl` is a remote client that talks to `matic-agent` via gRPC. It mimics a standard CLI tool but executes operations remotely.
+`osctl` is a remote client that talks to `keel-agent` via gRPC. It mimics a standard CLI tool but executes operations remotely.
 
 ## Usage
 

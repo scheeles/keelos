@@ -1,12 +1,12 @@
 # Using osctl
 
-`osctl` is the command-line tool for managing MaticOS nodes remotely. Since MaticOS has no SSH or shell access, `osctl` is the primary interface for administration.
+`osctl` is the command-line tool for managing KeelOS nodes remotely. Since KeelOS has no SSH or shell access, `osctl` is the primary interface for administration.
 
 ## Installation
 
 ### Download Pre-built Binary
 
-Download the latest `osctl` binary for your platform from [GitHub Releases](https://github.com/scheeles/maticos/releases).
+Download the latest `osctl` binary for your platform from [GitHub Releases](https://github.com/scheeles/keelos/releases).
 
 | Platform | File |
 |----------|------|
@@ -25,8 +25,8 @@ sudo mv osctl /usr/local/bin/
 ### Build from Source
 
 ```bash
-git clone https://github.com/scheeles/maticos.git
-cd maticos
+git clone https://github.com/scheeles/keelos.git
+cd keelos
 cargo build --release --package osctl
 # Binary is at target/release/osctl
 ```
@@ -62,7 +62,7 @@ Returns system information including:
 ### Install an Update
 
 ```bash
-osctl --addr 127.0.0.1:50052 install --image oci://registry.example.com/maticos:1.0.1
+osctl --addr 127.0.0.1:50052 install --image oci://registry.example.com/keelos:1.0.1
 ```
 
 This downloads the new OS image and writes it to the inactive partition. After installation, reboot to activate.

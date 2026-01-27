@@ -3,11 +3,11 @@ set -e
 
 KERNEL_VERSION="6.6.14"
 KERNEL_URL="https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz"
-CACHE_DIR="/maticos/.cache/kernel"
+CACHE_DIR="/keelos/.cache/kernel"
 # Build in ephemeral container FS which is case-sensitive (fixes Mac host mount issues)
 BUILD_DIR="/tmp/kernel-build"
 SRC_DIR="${BUILD_DIR}/linux-${KERNEL_VERSION}"
-OUTPUT_DIR="/maticos/build/kernel"
+OUTPUT_DIR="/keelos/build/kernel"
 
 mkdir -p "${CACHE_DIR}"
 mkdir -p "${BUILD_DIR}"
@@ -42,7 +42,7 @@ make mrproper
 make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- x86_64_defconfig
 
 # Enforce our specific requirements (example: SquashFS, OverlayFS)
-# In a real scenario, we would merge a fragment from /maticos/kernel/config/base.config
+# In a real scenario, we would merge a fragment from /keelos/kernel/config/base.config
 ./scripts/config --enable CONFIG_SQUASHFS
 ./scripts/config --enable CONFIG_SQUASHFS_XZ
 ./scripts/config --enable CONFIG_OVERLAY_FS

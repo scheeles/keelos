@@ -181,7 +181,7 @@ message HealthCheckResult {
 | Name | Description | Critical | Failure Condition |
 |------|-------------|----------|-------------------|
 | `boot` | System boot verification | Yes | Uptime < 10 seconds |
-| `service` | Service status check | Yes | matic-agent not running |
+| `service` | Service status check | Yes | keel-agent not running |
 | `network` | Network connectivity | No | No active interfaces |
 | `api` | API responsiveness | Yes | gRPC port not listening |
 
@@ -253,7 +253,7 @@ import (
     "context"
     "log"
     "google.golang.org/grpc"
-    pb "github.com/scheeles/maticos/pkg/api/node"
+    pb "github.com/scheeles/keelos/pkg/api/node"
 )
 
 conn, _ := grpc.Dial("localhost:50051", grpc.WithInsecure())
@@ -302,7 +302,7 @@ log.Printf("Success: %t", resp.Success)
 
 ### Health Check Configuration
 
-Health checks can be configured in the matic-agent:
+Health checks can be configured in the keel-agent:
 
 ```rust
 let health_config = HealthCheckerConfig {

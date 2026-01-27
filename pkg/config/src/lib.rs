@@ -41,7 +41,7 @@ impl NodeConfig {
     pub fn default_config() -> Self {
         Self {
             version: "v1".to_string(),
-            hostname: "matic-node".to_string(),
+            hostname: "keel-node".to_string(),
             kubernetes: KubernetesConfig::default(),
             containers: vec![],
         }
@@ -58,7 +58,7 @@ mod tests {
     fn test_load_config() {
         let yaml = r#"
 version: v1
-hostname: matic-01
+hostname: keel-01
 containers:
   - name: test-net
     image: alpine:latest
@@ -67,7 +67,7 @@ containers:
         write!(file, "{}", yaml).unwrap();
 
         let config = NodeConfig::load(file.path()).unwrap();
-        assert_eq!(config.hostname, "matic-01");
+        assert_eq!(config.hostname, "keel-01");
         assert_eq!(config.containers.len(), 1);
         assert_eq!(config.containers[0].name, "test-net");
     }
@@ -76,7 +76,7 @@ containers:
     fn test_default_config() {
         let config = NodeConfig::default_config();
         assert_eq!(config.version, "v1");
-        assert_eq!(config.hostname, "matic-node");
+        assert_eq!(config.hostname, "keel-node");
         assert!(config.containers.is_empty());
         assert!(config.kubernetes.version.is_none());
     }

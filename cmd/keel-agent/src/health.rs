@@ -1,4 +1,4 @@
-//! Health check endpoints for matic-agent
+//! Health check endpoints for keel-agent
 //!
 //! Provides HTTP endpoints for:
 //! - /healthz - Liveness check

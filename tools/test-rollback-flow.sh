@@ -54,17 +54,17 @@ check_prerequisites() {
     log_info "Prerequisites OK"
 }
 
-# Check if matic-agent is running
+# Check if keel-agent is running
 check_agent_running() {
-    log_info "Checking if matic-agent is running..."
+    log_info "Checking if keel-agent is running..."
     
     if ! curl -s "$ENDPOINT/health" &> /dev/null; then
-        log_warning "matic-agent is not running at $ENDPOINT"
-        log_info "Please start matic-agent before running this test"
+        log_warning "keel-agent is not running at $ENDPOINT"
+        log_info "Please start keel-agent before running this test"
         exit 1
     fi
     
-    log_info "matic-agent is running"
+    log_info "keel-agent is running"
 }
 
 # Get current system health
