@@ -21,6 +21,38 @@ repository = "https://github.com/scheeles/keelos"
 [workspace.dependencies]
 bsdiff = "0.2"
 
+[workspace.lints.rust]
+# Deny unsafe code by default (can be overridden in specific crates if needed)
+unsafe_code = "warn"
+# Warn on missing documentation for public items
+missing_docs = "warn"
+# Deny explicit panics in code (critical for PID 1)
+# Note: This will warn on panic! macro usage
+# unreachable_code = "warn"
+
+[workspace.lints.clippy]
+# Deny all clippy warnings by default
+all = "deny"
+# Enable pedantic lints (already mentioned in style guide)
+pedantic = "warn"
+# Enable nursery lints for experimental but useful checks
+nursery = "warn"
+# Cargo lints
+cargo = "warn"
+
+# Specific denials for critical safety issues
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+# Allow unwrap/expect in tests
+allow_unwrap_in_tests = "allow"
+allow_expect_in_tests = "allow"
+
+# Additional helpful lints
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+missing_safety_doc = "warn"
+
 [profile.release]
 lto = true
 codegen-units = 1

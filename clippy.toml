@@ -1,0 +1,21 @@
+# Clippy Configuration for KeelOS
+# This file defines the linting rules for the entire workspace.
+# See: https://doc.rust-lang.org/clippy/configuration.html
+
+# Warn on all wildcard imports to maintain explicit dependencies
+warn-on-all-wildcard-imports = true
+
+# Set a reasonable cognitive complexity threshold
+# PID 1 and agent code should be simple and maintainable
+cognitive-complexity-threshold = 15
+
+# Avoid missing inline documentation in public APIs
+missing-docs-in-public-items = true
+
+# Enforce consistent code style
+single-char-binding-names-threshold = 5
+
+# Ensure error handling is explicit
+# This helps prevent accidental unwraps in PID 1 code
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
