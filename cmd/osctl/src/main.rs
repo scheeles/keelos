@@ -7,6 +7,9 @@ use keel_api::node::{
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
+use std::path::PathBuf;
+
+mod init;
 
 #[derive(Parser)]
 #[command(name = "osctl")]
@@ -48,6 +51,32 @@ enum Commands {
     },
     /// Get system health status
     Health,
+    /// Initialize osctl certificates
+    Init {
+        /// Bootstrap mode: retrieve initial certificates from node
+        #[arg(long)]
+        bootstrap: bool,
+        
+        /// Node IP address (required for bootstrap mode)
+        #[arg(long)]
+        node: Option<String>,
+        
+        /// Path to kubeconfig (for K8s PKI mode)
+        #[arg(long)]
+        kubeconfig: Option<String>,
+        
+        /// Certificate directory (default: ~/.keel)
+        #[arg(long)]
+        cert_dir: Option<String>,
+        
+        /// Certificate name/CN (default: osctl-user)
+        #[arg(long, default_value = "osctl-user")]
+        cert_name: String,
+        
+        /// Auto-approve CSR (K8s mode, requires admin permissions)
+        #[arg(long)]
+        auto_approve: bool,
+    },
     /// Rollback operations
     Rollback {
         #[command(subcommand)]
@@ -182,6 +211,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
+        }
+        Commands::Init {
+            bootstrap,
+            node,
+            kubeconfig,
+            cert_dir,
+            cert_name,
+            auto_approve,
+        } => {
+            // Determine certificate directory
+            let cert_path = if let Some(dir) = cert_dir {
+                PathBuf::from(dir)
+            } else {
+                dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+                    .join(".keel")
+            };
+
+            if *bootstrap {
+                // Bootstrap mode: get initial certificates from node
+                let node_addr = node
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("--node required for bootstrap mode"))?;
+                init::init_bootstrap(node_addr, cert_path).await?;
+            } else {
+                // K8s PKI mode: get operational certificates
+                let kubeconfig_path = kubeconfig
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or("~/.kube/config");
+                init::init_kubernetes(kubeconfig_path, cert_path, cert_name, *auto_approve).await?;
+            }
+            return Ok(());
         }
         Commands::Rollback { action } => match action {
             RollbackAction::Trigger { reason } => {
