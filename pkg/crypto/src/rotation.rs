@@ -29,15 +29,14 @@ pub struct ExpiryInfo {
 /// Check if a certificate is expiring soon
 pub fn check_expiry(cert_pem: &str, warn_days: u32) -> Result<ExpiryInfo, RotationError> {
     // Parse the PEM certificate
-    let pem = pem::parse(cert_pem)
+    let pem_data = pem::parse(cert_pem)
         .map_err(|e| RotationError::Parse(format!("Failed to parse PEM: {}", e)))?;
 
     // Use x509-parser to extract validity dates
     use x509_parser::prelude::*;
 
-    let cert = X509Certificate::from_der(&pem.contents())
-        .map_err(|(_, e)| RotationError::Parse(format!("Failed to parse X.509: {}", e)))?
-        .1;
+    let (_, cert) = X509Certificate::from_der(pem_data.contents())
+        .map_err(|e| RotationError::Parse(format!("Failed to parse X.509: {:?}", e)))?;
 
     let not_before_timestamp = cert.validity().not_before.timestamp();
     let not_after_timestamp = cert.validity().not_after.timestamp();

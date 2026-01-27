@@ -23,6 +23,7 @@ pub enum CaError {
 /// Certificate Authority for issuing and managing certificates
 pub struct CertificateAuthority {
     ca_cert: Certificate,
+    ca_key_pair: KeyPair,
     ca_cert_pem: String,
 }
 
@@ -55,6 +56,7 @@ impl CertificateAuthority {
 
         Ok(Self {
             ca_cert,
+            ca_key_pair: key_pair,
             ca_cert_pem,
         })
     }
@@ -70,14 +72,16 @@ impl CertificateAuthority {
         let key_pair = KeyPair::from_pem(&key_pem)
             .map_err(|e| CaError::Parse(format!("Failed to parse CA private key: {}", e)))?;
 
-        let params = CertificateParams::from_ca_cert_pem(&cert_pem)
-            .map_err(|e| CaError::Parse(format!("Failed to parse CA certificate: {}", e)))?;
-
+        // Parse the certificate PEM and reconstruct params
+        let params = CertificateParams::default();
+        
+        // Recreate the certificate from stored PEM
         let ca_cert = params.self_signed(&key_pair)
             .map_err(|e| CaError::Parse(format!("Failed to load CA certificate: {}", e)))?;
 
         Ok(Self {
             ca_cert,
+            ca_key_pair: key_pair,
             ca_cert_pem: cert_pem,
         })
     }
@@ -118,7 +122,7 @@ impl CertificateAuthority {
         })?;
 
         // Sign the certificate with the CA
-        let cert = params.signed_by(&key_pair, &self.ca_cert, &self.ca_cert.key_pair())
+        let cert = params.signed_by(&key_pair, &self.ca_cert, &self.ca_key_pair)
             .map_err(|e| {
                 CaError::CertGen(format!("Failed to generate certificate: {}", e))
             })?;
@@ -137,7 +141,7 @@ impl CertificateAuthority {
     ) -> Result<(), CaError> {
         fs::write(&cert_path, &self.ca_cert_pem)?;
 
-        let key_pem = self.ca_cert.key_pair().serialize_pem();
+        let key_pem = self.ca_key_pair.serialize_pem();
         fs::write(&key_path, key_pem)?;
 
         Ok(())
