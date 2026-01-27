@@ -254,7 +254,7 @@ mod tests {
             "http://example.com/image.squashfs",
         ])
         .unwrap();
-        if let Commands::Update { source, sha256 } = cli.command {
+        if let Commands::Update { source, sha256, .. } = cli.command {
             assert_eq!(source, "http://example.com/image.squashfs");
             assert!(sha256.is_none());
         } else {
@@ -273,9 +273,39 @@ mod tests {
             "abc123def456",
         ])
         .unwrap();
-        if let Commands::Update { source, sha256 } = cli.command {
+        if let Commands::Update { source, sha256, .. } = cli.command {
             assert_eq!(source, "http://example.com/image.squashfs");
             assert_eq!(sha256, Some("abc123def456".to_string()));
+        } else {
+            panic!("Expected Update command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_update_delta() {
+        let cli = Cli::try_parse_from([
+            "osctl",
+            "update",
+            "--source",
+            "http://example.com/update.delta",
+            "--delta",
+            "--fallback",
+            "--full-image-url",
+            "http://example.com/full.img",
+        ])
+        .unwrap();
+        
+        if let Commands::Update { 
+            source, 
+            delta, 
+            fallback, 
+            full_image_url, 
+            .. 
+        } = cli.command {
+            assert_eq!(source, "http://example.com/update.delta");
+            assert!(delta);
+            assert!(fallback);
+            assert_eq!(full_image_url, Some("http://example.com/full.img".to_string()));
         } else {
             panic!("Expected Update command");
         }
