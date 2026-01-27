@@ -597,7 +597,7 @@ async fn execute_scheduled_update(
         schedule.is_delta,
         schedule
             .fallback_to_full
-            .then(|| schedule.full_image_url.as_deref())
+            .then_some(schedule.full_image_url.as_deref())
             .flatten(),
     )
     .await
