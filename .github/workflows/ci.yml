@@ -74,24 +74,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ hashFiles('tools/builder/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Cache Cargo Registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: "."
+          cache-on-failure: true
 
       - name: Cache Kernel Sources
         uses: actions/cache@v4
@@ -109,20 +96,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-kernel-build-
 
-      - name: Build Builder Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./tools/builder
-          push: false
-          load: true
-          tags: maticos-builder:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Move cache
+      - name: Pull or Build Builder Image
+        env:
+          REGISTRY: ghcr.io
+          IMAGE_NAME: ${{ github.repository }}/maticos-builder
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          # Try to pull from GHCR first
+          if docker pull $REGISTRY/$IMAGE_NAME:latest 2>/dev/null; then
+            docker tag $REGISTRY/$IMAGE_NAME:latest maticos-builder:latest
+            echo "✓ Using published builder image from GHCR"
+          else
+            # Fallback to building locally
+            echo "⚠ Published image not found, building locally"
+            docker build -t maticos-builder:latest ./tools/builder
+          fi
 
       - name: Build All Components
         run: |
@@ -135,14 +122,7 @@ jobs:
             maticos-builder:latest \
             /maticos/tools/ci-build-only.sh
 
-      - name: Run Unit Tests
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/maticos \
-            -v ~/.cargo/registry:/root/.cargo/registry \
-            -v ~/.cargo/git:/root/.cargo/git \
-            maticos-builder:latest \
-            cargo test --workspace
+
 
       - name: Fix Permissions
         if: always()
@@ -163,6 +143,24 @@ jobs:
   # ============================================================================
   # TESTS - Run in parallel after build completes
   # ============================================================================
+
+  test-unit:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Protobuf Compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Unit Tests
+        run: cargo test --workspace
 
   test-boot:
     needs: [build]
