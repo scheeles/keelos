@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 use tracing::info;
 
 /// Rotate client certificate by requesting a new one from Kubernetes
@@ -27,7 +27,10 @@ pub async fn rotate_certificate(
 
     // Check if existing certificate exists
     if !cert_file.exists() {
-        return Err(anyhow!("No existing certificate found at: {}", cert_file.display()));
+        return Err(anyhow!(
+            "No existing certificate found at: {}",
+            cert_file.display()
+        ));
     }
 
     // Check expiry of existing certificate
@@ -52,8 +55,14 @@ pub async fn rotate_certificate(
     println!("✓ Backed up existing certificates");
 
     // Request new certificate using same logic as init
-    println!("\n�� Requesting new certificate from Kubernetes...");
-    super::init::init_kubernetes(kubeconfig_path, cert_path, cert_name, auto_approve).await?;
+    println!("\n🔄 Requesting new certificate from Kubernetes...");
+    super::init::init_kubernetes(
+        kubeconfig_path,
+        cert_path,
+        cert_name.unwrap_or("keel-node"),
+        auto_approve,
+    )
+    .await?;
 
     println!("\n✅ Certificate rotation complete!");
     println!("   Old certificates backed up with .old extension");

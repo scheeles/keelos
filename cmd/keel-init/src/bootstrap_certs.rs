@@ -1,8 +1,8 @@
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, KeyPair};
 use std::fs;
 use std::path::Path;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tracing::{error, info, warn};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{info, warn};
 
 const BOOTSTRAP_CERT_DIR: &str = "/etc/keel/crypto";
 const BOOTSTRAP_CA_CERT: &str = "bootstrap-ca.pem";
@@ -71,7 +71,8 @@ pub fn generate_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error
     client_params.not_before = time::OffsetDateTime::from_unix_timestamp(not_before as i64)?;
     client_params.not_after = time::OffsetDateTime::from_unix_timestamp(not_after as i64)?;
 
-    let client_cert_pem = client_params.serialize_pem_with_signer(&ca_cert)?;
+    let client_cert = rcgen::Certificate::from_params(client_params)?;
+    let client_cert_pem = client_cert.serialize_pem_with_signer(&ca_cert)?;
     let client_key_pem = client_keypair.serialize_pem();
 
     // Write certificates to disk

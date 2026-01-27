@@ -12,10 +12,6 @@ mod certs;
 mod init;
 mod rotate;
 
-mod certs;
-mod init;
-mod rotate;
-
 #[derive(Parser)]
 #[command(name = "osctl")]
 #[command(about = "KeelOS CLI Client", long_about = None)]
@@ -221,6 +217,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Init { .. } => return handle_init_command(&cli).await,
         Commands::RotateCert { .. } => return handle_rotate_command(&cli).await,
         Commands::CertInfo { .. } => return handle_cert_info_command(&cli),
+        Commands::Bootstrap { .. } => "bootstrap",
+        Commands::BootstrapStatus => "bootstrap_status",
         Commands::Rollback { .. } => "rollback",
     };
 

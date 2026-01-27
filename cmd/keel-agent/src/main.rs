@@ -589,11 +589,6 @@ impl NodeService for HelperNodeService {
             node_name: config.node_name,
             kubeconfig_path: config.kubeconfig_path,
             bootstrapped_at: config.bootstrapped_at,
-            } else {
-                "".to_string()
-            },
-            bootstrap_time: "".to_string(),
->>>>>>> dee0ae3 (feat: implement bootstrap CSR signing RPC in keel-agent)
         }))
     }
 }
@@ -702,7 +697,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     } else {
         warn!(
-            cert_path = cert_path,
+            cert_path = server_cert_path,
             "Running without TLS - certificates not found"
         );
     }

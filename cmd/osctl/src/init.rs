@@ -1,19 +1,15 @@
 use anyhow::{anyhow, Result};
 use keel_api::node::node_service_client::NodeServiceClient;
-use keel_api::node::{SignBootstrapCertificateRequest, SignBootstrapCertificateResponse};
+use keel_api::node::SignBootstrapCertificateRequest;
 use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private};
+use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
-use openssl::x509::{X509Name, X509Req, X509ReqBuilder};
+use openssl::x509::{X509Name, X509ReqBuilder};
 use std::fs;
-use std::io::{self, Write};
 use std::path::PathBuf;
 
 /// Initialize osctl certificates - bootstrap mode
-pub async fn init_bootstrap(
-    node_addr: &str,
-    cert_dir: PathBuf,
-) -> Result<()> {
+pub async fn init_bootstrap(node_addr: &str, cert_dir: PathBuf) -> Result<()> {
     println!("🔐 Requesting bootstrap certificate from node...\n");
 
     println!("🔑 Generating client key pair locally...");
@@ -160,29 +156,30 @@ pub async fn init_kubernetes(
     // 5. Auto-approve if requested
     if auto_approve {
         println!("⏳ Auto-approving CSR...");
-        
-        use k8s_openapi::api::certificates::v1::CertificateSigningRequestStatus;
-        use k8s_openapi::apimachinery::pkg::apis::meta::v1::Condition;
-        
+
+        use k8s_openapi::api::certificates::v1::{
+            CertificateSigningRequestCondition, CertificateSigningRequestStatus,
+        };
+
         // Get the CSR to update
         let mut csr_to_approve = csr_api.get(&csr_name).await?;
-        
+
         // Set approval condition
-        let approval_condition = Condition {
+        let approval_condition = CertificateSigningRequestCondition {
             type_: "Approved".to_string(),
             status: "True".to_string(),
             last_transition_time: k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
                 chrono::Utc::now(),
             ),
-            message: Some("Approved by osctl".to_string()),
+            message: "Approved by osctl".to_string(),
             reason: "AutoApproved".to_string(),
-            observed_generation: None,
+            last_update_time: None,
         };
-        
+
         if csr_to_approve.status.is_none() {
             csr_to_approve.status = Some(CertificateSigningRequestStatus::default());
         }
-        
+
         if let Some(status) = &mut csr_to_approve.status {
             if status.conditions.is_none() {
                 status.conditions = Some(vec![]);
@@ -191,15 +188,16 @@ pub async fn init_kubernetes(
                 conditions.push(approval_condition);
             }
         }
-        
+
         // Update the CSR with approval
-        use kube::api::PatchParams;
+        use kube::api::{Patch, PatchParams};
+        let patch = serde_json::json!({
+            "status": csr_to_approve.status
+        });
         csr_api
-            .patch_status(&csr_name, &PatchParams::default(), &serde_json::json!({
-                "status": csr_to_approve.status
-            }))
+            .patch_status(&csr_name, &PatchParams::default(), &Patch::Merge(patch))
             .await?;
-        
+
         println!("✓ CSR auto-approved");
     } else {
         println!("⚠️  CSR requires manual approval. Run:");
@@ -208,16 +206,16 @@ pub async fn init_kubernetes(
 
     // 6. Wait for certificate to be issued
     println!("\n⏳ Waiting for certificate to be issued...");
-    
+
     let max_wait = std::time::Duration::from_secs(60);
     let start = std::time::Instant::now();
     let mut cert_pem = None;
-    
+
     while start.elapsed() < max_wait {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        
+
         let csr_status = csr_api.get(&csr_name).await?;
-        
+
         if let Some(status) = &csr_status.status {
             if let Some(certificate) = &status.certificate {
                 // Certificate is now available
@@ -225,16 +223,16 @@ pub async fn init_kubernetes(
                 break;
             }
         }
-        
+
         print!(".");
         use std::io::Write;
         std::io::stdout().flush()?;
     }
-    
+
     if cert_pem.is_none() {
         return Err(anyhow!("Timeout waiting for certificate to be issued"));
     }
-    
+
     println!("\n✓ Certificate issued!");
 
     // 7. Get Kubernetes CA certificate
@@ -250,10 +248,16 @@ pub async fn init_kubernetes(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(cert_dir.join("client.key"), fs::Permissions::from_mode(0o600))?;
+        fs::set_permissions(
+            cert_dir.join("client.key"),
+            fs::Permissions::from_mode(0o600),
+        )?;
     }
 
-    println!("\n✅ Operational certificates saved to: {}", cert_dir.display());
+    println!(
+        "\n✅ Operational certificates saved to: {}",
+        cert_dir.display()
+    );
     println!("\n💡 You can now use osctl with mTLS:");
     println!("   osctl --endpoint https://<node-ip>:50051 status");
 
@@ -283,13 +287,13 @@ async fn get_k8s_ca(client: &kube::Client) -> Result<String> {
 // Helper function for base64 encoding
 mod base64 {
     pub fn encode(bytes: &[u8]) -> String {
+        use base64::engine::general_purpose::STANDARD;
         use std::io::Write;
         let mut buf = Vec::new();
         {
-            let mut encoder = base64::write::EncoderWriter::new(&mut buf, base64::STANDARD);
+            let mut encoder = base64::write::EncoderWriter::new(&mut buf, &STANDARD);
             encoder.write_all(bytes).unwrap();
         }
         String::from_utf8(buf).unwrap()
     }
 }
-

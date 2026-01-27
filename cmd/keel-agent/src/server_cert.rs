@@ -1,12 +1,10 @@
 use anyhow::{anyhow, Result};
 use kube::api::{Api, PostParams};
 use kube::Client;
-use openssl::asn1::Asn1Time;
-use openssl::bn::{BigNum, MsbOption};
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
 use openssl::rsa::Rsa;
-use openssl::x509::extension::{ExtendedKeyUsage, KeyUsage, SubjectAlternativeName};
+use openssl::x509::extension::SubjectAlternativeName;
 use openssl::x509::{X509Name, X509Req};
 use std::fs;
 use std::path::Path;
@@ -85,7 +83,7 @@ fn generate_server_csr(node_ip: &str) -> Result<(PKey<Private>, String)> {
     san_builder.dns("keel-agent.local");
     san_builder.ip(node_ip);
     san_builder.ip("127.0.0.1");
-    
+
     // Note: Extensions in CSR require special handling
     // For now, we'll rely on K8s to add appropriate extensions
 
@@ -179,15 +177,15 @@ async fn wait_for_certificate(client: &Client, csr_name: &str) -> Result<String>
 async fn get_k8s_ca(client: &Client) -> Result<String> {
     // Read CA from kubelet kubeconfig
     let kubeconfig_path = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
-    let kubeconfig_content = fs::read_to_string(kubeconfig_path)?;
+    let _kubeconfig_content = fs::read_to_string(kubeconfig_path)?;
 
     // Parse kubeconfig to extract CA
     // For simplicity, we'll try to read the cluster CA from the APIServer
     // In production, parse the kubeconfig properly
-    
+
     use k8s_openapi::api::core::v1::ConfigMap;
     let cm_api: Api<ConfigMap> = Api::namespaced(client.clone(), "kube-system");
-    
+
     // Try to get CA from kube-root-ca.crt configmap
     match cm_api.get("kube-root-ca.crt").await {
         Ok(cm) => {
@@ -239,10 +237,11 @@ fn save_server_certificate(
 // Helper for base64 encode
 mod base64 {
     pub fn encode(bytes: &[u8]) -> String {
+        use base64::engine::general_purpose::STANDARD;
         use std::io::Write;
         let mut buf = Vec::new();
         {
-            let mut encoder = base64::write::EncoderWriter::new(&mut buf, base64::STANDARD);
+            let mut encoder = base64::write::EncoderWriter::new(&mut buf, &STANDARD);
             encoder.write_all(bytes).unwrap();
         }
         String::from_utf8(buf).unwrap()
