@@ -10,6 +10,7 @@ use tokio_stream::StreamExt;
 use std::path::PathBuf;
 
 mod init;
+mod certs;
 
 #[derive(Parser)]
 #[command(name = "osctl")]
@@ -116,20 +117,65 @@ enum RollbackAction {
     History,
 }
 
+/// Handle the Init command separately since it doesn't need a gRPC client
+async fn handle_init_command(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Commands::Init {
+        bootstrap,
+        node,
+        kubeconfig,
+        cert_dir,
+        cert_name,
+        auto_approve,
+    } = &cli.command
+    {
+        // Determine certificate directory
+        let cert_path = if let Some(dir) = cert_dir {
+            PathBuf::from(dir)
+        } else {
+            dirs::home_dir()
+                .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+                .join(".keel")
+        };
+
+        if *bootstrap {
+            // Bootstrap mode: get initial certificates from node
+            let node_addr = node
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("--node required for bootstrap mode"))?;
+            init::init_bootstrap(node_addr, cert_path).await?;
+        } else {
+            // K8s PKI mode: get operational certificates
+            let kubeconfig_path = kubeconfig
+                .as_ref()
+                .map(|s| s.as_str())
+                .unwrap_or("~/.kube/config");
+            init::init_kubernetes(kubeconfig_path, cert_path, cert_name, *auto_approve).await?;
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let cert_path = "client.pem";
-    let key_path = "client.key";
-    let ca_path = "ca.pem";
+    // Determine command name for certificate selection
+    let command_name = match &cli.command {
+        Commands::Status => "status",
+        Commands::Reboot { .. } => "reboot",
+        Commands::Update { .. } => "update",
+        Commands::Health => "health",
+        Commands::Init { .. } => return handle_init_command(&cli).await,
+        Commands::Rollback { .. } => "rollback",
+    };
 
     let mut endpoint = tonic::transport::Endpoint::from_shared(cli.endpoint.clone())?;
 
-    if std::path::Path::new(cert_path).exists() {
-        let cert = std::fs::read_to_string(cert_path)?;
-        let key = std::fs::read_to_string(key_path)?;
-        let ca = std::fs::read_to_string(ca_path)?;
+    // Try to use certificates based on command type
+    if let Ok(cert_paths) = certs::select_certificate_paths(command_name) {
+        let cert = std::fs::read_to_string(&cert_paths.cert)?;
+        let key = std::fs::read_to_string(&cert_paths.key)?;
+        let ca = std::fs::read_to_string(&cert_paths.ca)?;
 
         let identity = tonic::transport::Identity::from_pem(cert, key);
         let ca_cert = tonic::transport::Certificate::from_pem(ca);
@@ -140,6 +186,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .domain_name("localhost");
 
         endpoint = endpoint.tls_config(tls_config)?;
+    } else {
+        // No certificates found - only Init command can proceed without certs
+        eprintln!("❌ No certificates found for command: {}", command_name);
+        eprintln!("   Run 'osctl init --help' for certificate setup");
+        std::process::exit(1);
     }
 
     let mut client = NodeServiceClient::connect(endpoint).await?;
@@ -211,39 +262,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
-        }
-        Commands::Init {
-            bootstrap,
-            node,
-            kubeconfig,
-            cert_dir,
-            cert_name,
-            auto_approve,
-        } => {
-            // Determine certificate directory
-            let cert_path = if let Some(dir) = cert_dir {
-                PathBuf::from(dir)
-            } else {
-                dirs::home_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-                    .join(".keel")
-            };
-
-            if *bootstrap {
-                // Bootstrap mode: get initial certificates from node
-                let node_addr = node
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("--node required for bootstrap mode"))?;
-                init::init_bootstrap(node_addr, cert_path).await?;
-            } else {
-                // K8s PKI mode: get operational certificates
-                let kubeconfig_path = kubeconfig
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or("~/.kube/config");
-                init::init_kubernetes(kubeconfig_path, cert_path, cert_name, *auto_approve).await?;
-            }
-            return Ok(());
         }
         Commands::Rollback { action } => match action {
             RollbackAction::Trigger { reason } => {
