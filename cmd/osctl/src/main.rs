@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 mod init;
 mod certs;
+mod rotate;
 
 #[derive(Parser)]
 #[command(name = "osctl")]
@@ -77,6 +78,30 @@ enum Commands {
         /// Auto-approve CSR (K8s mode, requires admin permissions)
         #[arg(long)]
         auto_approve: bool,
+    },
+    /// Rotate client certificate
+    RotateCert {
+        /// Path to kubeconfig
+        #[arg(long, default_value = "~/.kube/config")]
+        kubeconfig: String,
+        
+        /// Certificate directory (default: ~/.keel)
+        #[arg(long)]
+        cert_dir: Option<String>,
+        
+        /// Certificate name/CN (default: osctl-user)
+        #[arg(long)]
+        cert_name: Option<String>,
+        
+        /// Auto-approve CSR (requires admin permissions)
+        #[arg(long)]
+        auto_approve: bool,
+    },
+    /// Show certificate information and expiry
+    CertInfo {
+        /// Certificate directory (default: ~/.keel)
+        #[arg(long)]
+        cert_dir: Option<String>,
     },
     /// Rollback operations
     Rollback {
@@ -155,6 +180,30 @@ async fn handle_init_command(cli: &Cli) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+/// Handle the RotateCert command separately
+async fn handle_rotate_command(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Commands::RotateCert {
+        kubeconfig,
+        cert_dir,
+        cert_name,
+        auto_approve,
+    } = &cli.command
+    {
+        let cert_path = cert_dir.as_ref().map(PathBuf::from);
+        rotate::rotate_certificate(kubeconfig, cert_path, cert_name.as_deref(), *auto_approve).await?;
+    }
+    Ok(())
+}
+
+/// Handle the CertInfo command
+fn handle_cert_info_command(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
+    if let Commands::CertInfo { cert_dir } = &cli.command {
+        let cert_path = cert_dir.as_ref().map(PathBuf::from);
+        rotate::show_cert_info(cert_path)?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -166,6 +215,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Update { .. } => "update",
         Commands::Health => "health",
         Commands::Init { .. } => return handle_init_command(&cli).await,
+        Commands::RotateCert { .. } => return handle_rotate_command(&cli).await,
+        Commands::CertInfo { .. } => return handle_cert_info_command(&cli),
         Commands::Rollback { .. } => "rollback",
     };
 
@@ -260,8 +311,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "  {} {} - {} ({}ms)",
                         icon, check.name, check.message, check.duration_ms
                     );
-                }
-            }
+                }\n            }\n        }
+        Commands::RotateCert {
+            kubeconfig,
+            cert_dir,
+            cert_name,
+            auto_approve,
+        } => {
+            let cert_path = cert_dir.as_ref().map(PathBuf::from);
+            rotate::rotate_certificate(kubeconfig, cert_path, cert_name.as_deref(), *auto_approve).await?;
+        }
+        Commands::CertInfo { cert_dir } => {
+            let cert_path = cert_dir.as_ref().map(PathBuf::from);
+            rotate::show_cert_info(cert_path)?;
         }
         Commands::Rollback { action } => match action {
             RollbackAction::Trigger { reason } => {
