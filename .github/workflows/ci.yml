@@ -20,67 +20,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-lint-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-lint-
-            ${{ runner.os }}-buildx-
+          components: clippy, rustfmt
 
-      - name: Cache Cargo Registry
-        uses: actions/cache@v4
+      - name: Install Protobuf Compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-lint-
-            ${{ runner.os }}-cargo-
-
-      - name: Build Builder Image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./tools/builder
-          push: false
-          load: true
-          tags: maticos-builder:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          key: lint-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run Clippy Lints
-        run: |
-          mkdir -p target
-          docker run --rm \
-            -v ${{ github.workspace }}:/maticos \
-            -v ~/.cargo/registry:/root/.cargo/registry \
-            -v ~/.cargo/git:/root/.cargo/git \
-            maticos-builder:latest \
-            cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace -- -D warnings
 
       - name: Check Formatting
-        run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/maticos \
-            -v ~/.cargo/registry:/root/.cargo/registry \
-            -v ~/.cargo/git:/root/.cargo/git \
-            maticos-builder:latest \
-            cargo fmt --all -- --check
-
-      - name: Fix Permissions
-        if: always()
-        run: |
-          sudo chown -R $USER:$USER target ~/.cargo || true
+        run: cargo fmt --all -- --check
 
   security:
     runs-on: ubuntu-latest
@@ -113,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          key: ${{ runner.os }}-buildx-${{ hashFiles('tools/builder/Dockerfile') }}
           restore-keys: |
             ${{ runner.os }}-buildx-
 
