@@ -4,6 +4,11 @@
 //! - Node status queries
 //! - Reboot scheduling
 //! - A/B partition updates
+//!
+//! Additionally provides HTTP endpoints for:
+//! - /healthz - Liveness checks
+//! - /readyz - Readiness checks
+//! - /metrics - Prometheus metrics
 
 use matic_api::node::node_service_server::{NodeService, NodeServiceServer};
 use matic_api::node::{
@@ -11,12 +16,15 @@ use matic_api::node::{
     UpdateProgress,
 };
 use std::pin::Pin;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{debug, info, warn, Level};
-use tracing_subscriber::FmtSubscriber;
+use tracing::{debug, info, warn};
 
 mod disk;
+mod health;
+mod telemetry;
 
 #[derive(Debug, Default)]
 pub struct HelperNodeService {}
@@ -114,18 +122,15 @@ impl NodeService for HelperNodeService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize tracing subscriber
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
-        .with_target(true)
-        .compact()
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    // Initialize OpenTelemetry telemetry
+    let otlp_endpoint = std::env::var("OTLP_ENDPOINT").ok();
+    telemetry::init_telemetry("matic-agent", otlp_endpoint)?;
 
-    let addr = "0.0.0.0:50051".parse()?;
+    let grpc_addr = "0.0.0.0:50051".parse()?;
+    let health_addr = "0.0.0.0:9090".parse()?;
     let node_service = HelperNodeService::default();
 
-    info!(addr = %addr, "Matic Agent starting");
+    info!(grpc_addr = %grpc_addr, "Matic Agent starting");
 
     // Load declarative configuration
     let config_path = "/etc/matic/node.yaml";
@@ -169,11 +174,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    info!("gRPC server ready");
-    builder
+    // Start health/metrics HTTP server
+    let metrics = Arc::new(RwLock::new(telemetry::SystemMetrics::default()));
+    let health_state = Arc::new(health::HealthState {
+        metrics: metrics.clone(),
+    });
+    let health_router = health::create_health_router(health_state);
+
+    let health_server = tokio::spawn(async move {
+        info!("Starting health/metrics HTTP server");
+        let listener = tokio::net::TcpListener::bind(health_addr)
+            .await
+            .expect("Failed to bind health server");
+        axum::serve(listener, health_router)
+            .await
+            .expect("Health server failed");
+    });
+
+    // Start gRPC server
+    info!(addr = %grpc_addr, "Starting gRPC server");
+    let grpc_server = builder
         .add_service(NodeServiceServer::new(node_service))
-        .serve(addr)
-        .await?;
+        .serve(grpc_addr);
+
+    // Run both servers concurrently
+    tokio::select! {
+        result = grpc_server => {
+            if let Err(e) = result {
+                warn!(error = %e, "gRPC server error");
+            }
+        }
+        result = health_server => {
+            if let Err(e) = result {
+                warn!(error = %e, "Health server error");
+            }
+        }
+    }
+
+    // Shutdown telemetry
+    telemetry::shutdown_telemetry();
 
     Ok(())
 }
