@@ -632,13 +632,16 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
         // Try to identify if there was a recent update to mark as failed/rolledback
         // In a real scenario, we'd query the scheduler for the last "Completed" update that might be the cause
         // For now, we'll log it at the system level.
-        
+
         warn!("Initiating AUTOMATIC ROLLBACK due to critical health failure");
-        
+
         // Attempt to persist rollback state (best effort before reboot)
         // Note: This relies on storage being writable and shared across boots if we want to see it after rollback
-        if let Err(e) = scheduler.register_rollback("Critical health failure at boot").await {
-             error!(error = %e, "Failed to persist rollback event");
+        if let Err(e) = scheduler
+            .register_rollback("Critical health failure at boot")
+            .await
+        {
+            error!(error = %e, "Failed to persist rollback event");
         }
 
         match disk::rollback_to_previous_partition() {

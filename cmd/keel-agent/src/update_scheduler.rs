@@ -156,7 +156,7 @@ impl UpdateScheduler {
         // In a real implementation we might look for specific IDs or "Pending/Running" that finished recently
         // Here we just look for the last created one? Or maybe we can't easily associate without state.
         // We'll simplisticly look for the last modified one.
-        
+
         // Actually, better to just log a system-wide event or find a "Completed" one and mark it RolledBack.
         // For now, let's just log it if we find a recent one.
         info!("Registering rollback event: {}", reason);
