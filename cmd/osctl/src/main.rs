@@ -169,7 +169,7 @@ async fn handle_init_command(cli: &Cli) -> Result<(), Box<dyn std::error::Error>
             init::init_bootstrap(node_addr, cert_path).await?;
         } else {
             // K8s PKI mode: get operational certificates
-            let _kubeconfig_path = kubeconfig
+            let kubeconfig_path = kubeconfig
                 .as_ref()
                 .map(|s| s.as_str())
                 .unwrap_or("~/.kube/config");

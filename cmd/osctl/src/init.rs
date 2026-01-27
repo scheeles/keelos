@@ -80,7 +80,7 @@ pub async fn init_bootstrap(node_addr: &str, cert_dir: PathBuf) -> Result<()> {
 
 /// Initialize osctl certificates - Kubernetes PKI mode
 pub async fn init_kubernetes(
-    kubeconfig_path: &str,
+    _kubeconfig_path: &str,
     cert_dir: PathBuf,
     cert_name: &str,
     auto_approve: bool,
