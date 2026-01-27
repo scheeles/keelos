@@ -37,6 +37,7 @@ mod hooks;
 mod telemetry;
 mod update_scheduler;
 mod bootstrap;
+mod server_cert;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
@@ -638,8 +639,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Configuration not found, using defaults"
         );
         keel_config::NodeConfig::default_config()
-    };
-    info!(hostname = %config.hostname, "Configuration loaded");
+    };\n    info!(hostname = %config.hostname, "Configuration loaded");
+
+    // Request server certificate from Kubernetes if needed
+    if bootstrap::is_bootstrapped() {
+        // Determine node IP from configuration or environment
+        let node_ip = std::env::var("NODE_IP")
+            .or_else(|_| std::env::var("POD_IP"))
+            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        
+        if let Err(e) = server_cert::request_server_certificate(&node_ip).await {
+            warn!(
+                error = %e,
+                "Could not request server certificate from Kubernetes, will use existing cert if available"
+            );
+        }
+    }
 
     // mTLS setup - support both bootstrap and K8s CA certificates
     let mut builder = Server::builder();
