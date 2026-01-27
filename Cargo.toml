@@ -11,6 +11,9 @@ members = [
 ]
 resolver = "2"
 
+[workspace.dependencies]
+bsdiff = "0.2"
+
 [profile.release]
 lto = true
 codegen-units = 1

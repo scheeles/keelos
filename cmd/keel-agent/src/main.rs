@@ -51,7 +51,7 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetStatusResponse>, Status> {
         debug!("Received get_status request");
         let reply = GetStatusResponse {
-            hostname: "keel-node".to_string(),   // TODO: Get from hostname
+            hostname: "keel-node".to_string(),    // TODO: Get from hostname
             kernel_version: "6.6.14".to_string(), // TODO: Get from uname
             os_version: "0.1.0".to_string(),
             uptime_seconds: 0.0, // TODO: Get from /proc/uptime
@@ -82,7 +82,20 @@ impl NodeService for HelperNodeService {
         } else {
             Some(req.expected_sha256.clone())
         };
-        info!(source = %source_url, has_sha256 = expected_sha256.is_some(), "Install update requested");
+        let is_delta = req.is_delta;
+        let fallback_url = if req.fallback_to_full && !req.full_image_url.is_empty() {
+            Some(req.full_image_url.clone())
+        } else {
+            None
+        };
+
+        info!(
+            source = %source_url,
+            has_sha256 = expected_sha256.is_some(),
+            is_delta = is_delta,
+            has_fallback = fallback_url.is_some(),
+            "Install update requested"
+        );
 
         let output = async_stream::try_stream! {
             yield UpdateProgress {
@@ -91,6 +104,8 @@ impl NodeService for HelperNodeService {
                 success: false,
                 download_speed_bps: 0,
                 eta_seconds: 0,
+                phase: "preparing".to_string(),
+                bytes_saved: 0,
             };
 
             let inactive = disk::get_inactive_partition()
@@ -104,19 +119,39 @@ impl NodeService for HelperNodeService {
                 success: false,
                 download_speed_bps: 0,
                 eta_seconds: 0,
+                phase: "preparing".to_string(),
+                bytes_saved: 0,
+            };
+
+            let phase_msg = if is_delta {
+                format!("Downloading delta and patching to {}...", inactive.device)
+            } else {
+                format!("Downloading and flashing to {}...", inactive.device)
             };
 
             yield UpdateProgress {
                 percentage: 20,
-                message: format!("Downloading and flashing to {}...", inactive.device),
+                message: phase_msg,
                 success: false,
                 download_speed_bps: 0,
                 eta_seconds: 0,
+                phase: "downloading".to_string(),
+                bytes_saved: 0,
             };
 
-            // Disk flashing with optional SHA256 verification
-            disk::flash_image(&source_url, &inactive.device, expected_sha256.as_deref()).await
+            // Disk flashing with delta support
+            let bytes_saved = disk::flash_image(
+                &source_url,
+                &inactive.device,
+                expected_sha256.as_deref(),
+                is_delta,
+                fallback_url.as_deref(),
+            ).await
                 .map_err(|e| Status::internal(format!("Flash error: {}", e)))?;
+
+            if is_delta && bytes_saved > 0 {
+                info!(bytes_saved = bytes_saved, "Delta update saved bandwidth");
+            }
 
             yield UpdateProgress {
                 percentage: 80,
@@ -124,6 +159,8 @@ impl NodeService for HelperNodeService {
                 success: false,
                 download_speed_bps: 0,
                 eta_seconds: 0,
+                phase: "verifying".to_string(),
+                bytes_saved,
             };
 
             disk::switch_boot_partition(inactive.index)
@@ -131,12 +168,20 @@ impl NodeService for HelperNodeService {
 
             info!(target_partition = inactive.index, "Update installed successfully");
 
+            let final_msg = if bytes_saved > 0 {
+                format!("Update installed successfully. Saved {} bytes. Reboot to apply.", bytes_saved)
+            } else {
+                "Update installed successfully. Reboot to apply.".to_string()
+            };
+
             yield UpdateProgress {
                 percentage: 100,
-                message: "Update installed successfully. Reboot to apply.".to_string(),
+                message: final_msg,
                 success: true,
                 download_speed_bps: 0,
                 eta_seconds: 0,
+                phase: "completed".to_string(),
+                bytes_saved,
             };
         };
 
@@ -523,11 +568,13 @@ async fn execute_scheduled_update(
         "Starting scheduled update execution"
     );
 
-    // Flash the image
+    // Flash the image (delta support will be added to UpdateSchedule in future)
     disk::flash_image(
         &schedule.source_url,
         &inactive.device,
         schedule.expected_sha256.as_deref(),
+        false, // is_delta - TODO: add to UpdateSchedule struct
+        None,  // fallback_url - TODO: add to UpdateSchedule struct
     )
     .await
     .map_err(|e| e.to_string())?;

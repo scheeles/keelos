@@ -33,7 +33,35 @@ Trigger a reboot to switch to the new partition.
 osctl reboot
 ```
 
-## Rollbacks
+## Delta Updates (Bandwidth-Optimized)
+
+For minor version updates, KeelOS supports **Delta Updates**. Instead of downloading the full OS image (~100MB+), the agent downloads a small binary patch file (often <10MB) containing only the differences between the running version and the new version.
+
+### 1. Generate Delta File
+Delta files are generated on your build server using the `generate-delta.sh` tool. This tool uses `bsdiff` to compare two SquashFS images.
+
+```bash
+# syntax: generate-delta.sh OLD_IMAGE NEW_IMAGE OUTPUT_DELTA
+./tools/builder/generate-delta.sh os-v1.0.squashfs os-v1.1.squashfs update-v1.0-to-v1.1.delta
+```
+
+### 2. Apply Delta Update
+Use the `--delta` flag with `osctl update`. You MUST provide a `--fallback` URL (the full image) in case the delta application fails (e.g., mismatching base version).
+
+```bash
+osctl update \
+  --source http://update-server/update-v1.0-to-v1.1.delta \
+  --delta \
+  --fallback \
+  --full-image-url http://update-server/os-v1.1.squashfs
+```
+
+### How it Works
+1.  **Download**: The agent downloads the small delta file.
+2.  **Patch**: It reads the *active* partition (v1.0), applies the patch in memory, and writes the resulting v1.1 image to the *inactive* partition.
+3.  **Verify**: It calculates the SHA256 of the new image and compares it against the expected hash (if provided).
+4.  **Fallback**: If patching fails or checksums don't match, the agent automatically downloads the full image from `full_image_url`.
+
 
 KeelOS supports both automatic and manual rollbacks to ensure high availability.
 

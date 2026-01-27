@@ -36,6 +36,11 @@ message InstallUpdateRequest {
   string source_url = 1;
   // Expected SHA256 checksum (optional)
   string expected_sha256 = 2;
+  
+  // Delta update support
+  bool is_delta = 3;
+  bool fallback_to_full = 4;  // If delta fails, try full image
+  string full_image_url = 5;   // URL for fallback full image
 }
 
 message UpdateProgress {
@@ -46,6 +51,10 @@ message UpdateProgress {
   uint32 eta_seconds = 4;
   // Optional: Download speed in bytes/sec
   uint64 download_speed_bps = 5;
+  
+  // Delta-specific info
+  string phase = 6;  // "downloading", "patching", "verifying"
+  uint64 bytes_saved = 7;  // Bandwidth saved vs full download
 }
 
 message GetStatusRequest {}
@@ -89,6 +98,11 @@ message ScheduleUpdateRequest {
   
   // Optional: Post-update hook command
   string post_update_hook = 8;
+  
+  // Delta update support
+  bool is_delta = 9;
+  bool fallback_to_full = 10;
+  string full_image_url = 11;
 }
 
 message ScheduleUpdateResponse {
