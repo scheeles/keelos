@@ -151,7 +151,7 @@ impl UpdateScheduler {
 
     /// Mark the latest schedule as RolledBack
     pub async fn register_rollback(&self, reason: &str) -> Result<(), String> {
-        let mut schedules = self.schedules.write().await;
+        // let mut schedules = self.schedules.write().await;
         // Find the most recent non-pending schedule
         // In a real implementation we might look for specific IDs or "Pending/Running" that finished recently
         // Here we just look for the last created one? Or maybe we can't easily associate without state.
