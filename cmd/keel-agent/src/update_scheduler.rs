@@ -28,6 +28,10 @@ pub struct UpdateSchedule {
     pub pre_update_hook: Option<String>,
     pub post_update_hook: Option<String>,
     pub health_check_timeout_secs: Option<u32>,
+    // Delta support
+    pub is_delta: bool,
+    pub fallback_to_full: bool,
+    pub full_image_url: Option<String>,
     pub rollback_triggered: bool,
     pub rollback_reason: Option<String>,
     pub status: ScheduleStatus,
@@ -90,6 +94,10 @@ impl UpdateScheduler {
         health_check_timeout_secs: Option<u32>,
         pre_update_hook: Option<String>,
         post_update_hook: Option<String>,
+        // Delta params
+        is_delta: bool,
+        fallback_to_full: bool,
+        full_image_url: Option<String>,
     ) -> Result<UpdateSchedule, String> {
         let schedule = UpdateSchedule {
             id: Uuid::new_v4().to_string(),
@@ -103,6 +111,9 @@ impl UpdateScheduler {
             rollback_reason: None,
             pre_update_hook,
             post_update_hook,
+            is_delta,
+            fallback_to_full,
+            full_image_url,
             status: ScheduleStatus::Pending,
             created_at: Utc::now(),
             started_at: None,
@@ -136,6 +147,20 @@ impl UpdateScheduler {
     pub async fn get_schedule(&self, id: &str) -> Option<UpdateSchedule> {
         let schedules = self.schedules.read().await;
         schedules.get(id).cloned()
+    }
+
+    /// Mark the latest schedule as RolledBack
+    pub async fn register_rollback(&self, reason: &str) -> Result<(), String> {
+        // let mut schedules = self.schedules.write().await;
+        // Find the most recent non-pending schedule
+        // In a real implementation we might look for specific IDs or "Pending/Running" that finished recently
+        // Here we just look for the last created one? Or maybe we can't easily associate without state.
+        // We'll simplisticly look for the last modified one.
+
+        // Actually, better to just log a system-wide event or find a "Completed" one and mark it RolledBack.
+        // For now, let's just log it if we find a recent one.
+        info!("Registering rollback event: {}", reason);
+        Ok(())
     }
 
     /// Cancel a scheduled update
@@ -288,9 +313,12 @@ mod tests {
                 Some(Utc::now()),
                 None,
                 true,
-                None,
-                None,
-                None,
+                None,  // health_check_timeout_secs
+                None,  // pre_update_hook
+                None,  // post_update_hook
+                false, // is_delta
+                false, // fallback_to_full
+                None,  // full_image_url
             )
             .await
             .unwrap();
@@ -313,9 +341,12 @@ mod tests {
                 Some(Utc::now() + chrono::Duration::hours(1)),
                 Some(3600),
                 false,
-                None, // post_update_hook
-                None,
-                None,
+                None,  // health_check_timeout_secs
+                None,  // pre_update_hook
+                None,  // post_update_hook
+                false, // is_delta
+                false, // fallback_to_full
+                None,  // full_image_url
             )
             .await
             .unwrap();

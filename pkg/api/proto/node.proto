@@ -100,6 +100,7 @@ message ScheduleUpdateRequest {
   string post_update_hook = 8;
   
   // Delta update support
+  // Delta update support
   bool is_delta = 9;
   bool fallback_to_full = 10;
   string full_image_url = 11;
