@@ -3,6 +3,7 @@
 //! Handles automatic certificate rotation before expiry.
 
 use crate::CryptoError;
+use pem::parse as pem_parse;
 use std::path::Path;
 use thiserror::Error;
 use time::OffsetDateTime;
@@ -29,7 +30,7 @@ pub struct ExpiryInfo {
 /// Check if a certificate is expiring soon
 pub fn check_expiry(cert_pem: &str, warn_days: u32) -> Result<ExpiryInfo, RotationError> {
     // Parse the PEM certificate
-    let pem_data = pem::parse(cert_pem)
+    let pem_data = pem_parse(cert_pem)
         .map_err(|e| RotationError::Parse(format!("Failed to parse PEM: {}", e)))?;
 
     // Use x509-parser to extract validity dates
