@@ -1,4 +1,4 @@
-//! Health check framework for MaticOS
+//! Health check framework for KeelOS
 //!
 //! Validates system health after updates with support for:
 //! - Pluggable health check implementations

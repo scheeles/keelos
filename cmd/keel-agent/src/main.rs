@@ -1,4 +1,4 @@
-//! MaticOS Agent - gRPC management server
+//! KeelOS Agent - gRPC management server
 //!
 //! The Matic Agent provides a gRPC API for managing the node, including:
 //! - Node status queries

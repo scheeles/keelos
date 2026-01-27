@@ -1,4 +1,4 @@
-//! Disk management for MaticOS A/B partition updates
+//! Disk management for KeelOS A/B partition updates
 //!
 //! This module handles:
 //! - Detecting active/inactive partitions
@@ -22,7 +22,7 @@ pub struct PartitionInfo {
     pub index: u32,
 }
 
-/// Default disk device for MaticOS
+/// Default disk device for KeelOS
 const DEFAULT_DISK: &str = "/dev/sda";
 
 /// Partition indices for A/B slots

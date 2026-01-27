@@ -1,4 +1,4 @@
-//! MaticOS Init Process (PID 1)
+//! KeelOS Init Process (PID 1)
 //!
 //! This is the first process started by the kernel. As PID 1, it has special
 //! responsibilities:
@@ -34,7 +34,7 @@ fn main() {
     // Ignore errors if subscriber is already set (shouldn't happen for PID 1)
     let _ = tracing::subscriber::set_global_default(subscriber);
 
-    info!("Welcome to MaticOS v0.1");
+    info!("Welcome to KeelOS v0.1");
     info!("Init process started (PID 1)");
 
     if let Err(e) = run() {

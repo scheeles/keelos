@@ -39,11 +39,11 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 
-          # Configure Claude's behavior for MaticOS project
+          # Configure Claude's behavior for KeelOS project
           claude_args: |
             --model claude-opus-4-1-20250805
             --max-turns 10
-            --system-prompt "You are reviewing code for MaticOS, an immutable API-driven Linux distribution. Follow these critical rules:
+            --system-prompt "You are reviewing code for KeelOS, an immutable API-driven Linux distribution. Follow these critical rules:
             1. Review .ai-context/STYLE_GUIDE.md first
             2. Ensure matic-init (PID 1) code NEVER panics - must use Result<T, E>
             3. Verify all binaries are statically linked (musl)

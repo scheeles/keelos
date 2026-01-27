@@ -8,7 +8,7 @@ use tokio_stream::StreamExt;
 
 #[derive(Parser)]
 #[command(name = "osctl")]
-#[command(about = "MaticOS CLI Client", long_about = None)]
+#[command(about = "KeelOS CLI Client", long_about = None)]
 struct Cli {
     #[arg(long, default_value = "http://[::1]:50051")]
     endpoint: String,

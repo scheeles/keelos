@@ -2,12 +2,12 @@
 
 ## Overview
 
-Implements the complete Enhanced Update Mechanism for MaticOS, including:
+Implements the complete Enhanced Update Mechanism for KeelOS, including:
 - **Phase 1**: Update scheduling with maintenance windows
 - **Phase 2**: Automatic rollback with health monitoring
 - **Bonus**: ARM Mac build support
 
-This PR introduces a production-ready, resilient update system with automatic failure recovery, ensuring MaticOS nodes can safely update with minimal intervention.
+This PR introduces a production-ready, resilient update system with automatic failure recovery, ensuring KeelOS nodes can safely update with minimal intervention.
 
 ---
 
@@ -156,7 +156,7 @@ osctl rollback history          # View rollback history
 ```bash
 # Enable automatic rollback on health check failure
 $ osctl schedule update \
-  --source http://cdn.example.com/maticos-v2.0.squashfs \
+  --source http://cdn.example.com/keelos-v2.0.squashfs \
   --sha256 abc123... \
   --enable-auto-rollback \
   --health-check-timeout 300
@@ -185,7 +185,7 @@ $ osctl schedule status sched-20260127-001
 
 Schedule: sched-20260127-001
 Status: Completed
-Source: http://cdn.example.com/maticos-v2.0.squashfs
+Source: http://cdn.example.com/keelos-v2.0.squashfs
 Auto-rollback: Enabled
 Health check timeout: 300s
 ```
@@ -385,7 +385,7 @@ After merge:
 
 ## 🎉 Summary
 
-This PR delivers a **complete, production-ready update system** for MaticOS with:
+This PR delivers a **complete, production-ready update system** for KeelOS with:
 
 ✅ **Automated Updates**: Schedule updates with maintenance windows  
 ✅ **Health Monitoring**: Comprehensive post-update validation  
