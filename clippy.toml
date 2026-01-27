@@ -1,0 +1,15 @@
+# Clippy Configuration for KeelOS
+# This file defines the linting rules for the entire workspace.
+# See: https://doc.rust-lang.org/clippy/configuration.html
+
+# Warn on all wildcard imports to maintain explicit dependencies
+warn-on-all-wildcard-imports = true
+
+# Set a reasonable cognitive complexity threshold
+# PID 1 and agent code should be simple and maintainable
+cognitive-complexity-threshold = 15
+
+# Ensure error handling is explicit
+# This helps prevent accidental unwraps in PID 1 code
+# Note: allow-unwrap-in-tests and allow-expect-in-tests are controlled via workspace.lints in Cargo.toml
+

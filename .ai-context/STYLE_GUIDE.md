@@ -16,10 +16,34 @@ This document defines the rules for contributing to KeelOS.
 ## Rust Guidelines
 
 *   **Formatter**: Use `rustfmt` with default settings.
-*   **Lints**: Code must pass `clippy::pedantic`.
+*   **Lints**: The project uses comprehensive linting configured in:
+    *   `clippy.toml` - Project-specific clippy configuration
+    *   `Cargo.toml` - Workspace-level lint rules (`[workspace.lints]`)
+    *   Enabled lint groups:
+        *   `clippy::all` (deny) - All clippy lints
+        *   `clippy::pedantic` (warn) - Opinionated but helpful lints
+        *   `clippy::nursery` (warn) - Experimental but useful checks
+        *   `clippy::cargo` (warn) - Cargo manifest lints
+    *   Critical denials for PID 1 safety:
+        *   `unwrap_used` - Prevents `.unwrap()` calls
+        *   `expect_used` - Prevents `.expect()` calls
+        *   `panic` - Prevents explicit `panic!()` macros
+        *   These are allowed in test code only
 *   **Error Handling**:
-    *   ❌ `unwrap()` or `expect()` in runtime code.
+    *   ❌ `unwrap()` or `expect()` in runtime code (enforced by lints).
     *   ✅ `?` operator or explicit matching.
+    *   ✅ Proper error documentation with `/// # Errors`
+*   **Running Lints Locally**:
+    ```bash
+    # Check all lints (same as CI)
+    cargo clippy --workspace -- -D warnings
+    
+    # Auto-fix some issues
+    cargo clippy --workspace --fix
+    
+    # Check formatting
+    cargo fmt --all -- --check
+    ```
 *   **Async**: Use `tokio` for the Agent. `keel-init` should remain synchronous where possible for simplicity, or use a minimal executor if needed.
 
 ## Testing Guidelines

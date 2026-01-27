@@ -69,10 +69,13 @@ Claude will provide feedback on the PR and may request changes before approval.
 ## Code Guidelines
 
 ### Rust
-- Formatter: `rustfmt` with defaults
-- Lints: Must pass `clippy::pedantic`
-- No `unwrap()` or `expect()` in runtime code; use `?` operator
-- Async: Use `tokio` for the Agent; keep `keel-init` synchronous
+- **Formatter**: `rustfmt` with defaults
+- **Lints**: Comprehensive linting is configured in `clippy.toml` and `Cargo.toml` ([workspace.lints])
+  - Must pass `cargo clippy --workspace -- -D warnings` (enforced in CI)
+  - Critical rules: No `unwrap()`, `expect()`, or `panic!()` in runtime code
+  - See [`.ai-context/STYLE_GUIDE.md`](./.ai-context/STYLE_GUIDE.md) for full lint configuration details
+- **Error Handling**: Use `?` operator or explicit matching; never `unwrap()`/`expect()` outside tests
+- **Async**: Use `tokio` for the Agent; keep `keel-init` synchronous
 
 ### Commit Messages
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
