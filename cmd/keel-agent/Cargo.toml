@@ -40,5 +40,6 @@ async-trait = "0.1"
 bsdiff = { workspace = true }
 tempfile = "3.0"
 hostname = "0.3"
+thiserror = "1.0"
 
 
