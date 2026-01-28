@@ -122,8 +122,9 @@ fn setup_filesystems() -> Result<(), InitError> {
     // Mount proc - critical for process management
     let ret = unsafe {
         libc::mount(
-            b"proc\0".as_ptr() as *const i8,
-            b"/proc\0".as_ptr() as *const i8,
+            c"proc".as_ptr(),
+            c"/proc".as_ptr(),
+            c"proc".as_ptr(),
             0,
             std::ptr::null_mut(),
         )
@@ -137,8 +138,9 @@ fn setup_filesystems() -> Result<(), InitError> {
     // Mount sysfs
     let ret = unsafe {
         libc::mount(
-            b"sysfs\0".as_ptr() as *const i8,
-            b"/sys\0".as_ptr() as *const i8,
+            c"sysfs".as_ptr(),
+            c"/sys".as_ptr(),
+            c"sysfs".as_ptr(),
             0,
             std::ptr::null_mut(),
         )
@@ -152,8 +154,9 @@ fn setup_filesystems() -> Result<(), InitError> {
     // Mount devtmpfs - critical for device access
     let ret = unsafe {
         libc::mount(
-            b"devtmpfs\0".as_ptr() as *const i8,
-            b"/dev\0".as_ptr() as *const i8,
+            c"devtmpfs".as_ptr(),
+            c"/dev".as_ptr(),
+            c"devtmpfs".as_ptr(),
             0,
             std::ptr::null_mut(),
         )
@@ -167,8 +170,9 @@ fn setup_filesystems() -> Result<(), InitError> {
     // Mount tmpfs
     let ret = unsafe {
         libc::mount(
-            b"tmpfs\0".as_ptr() as *const i8,
-            b"/tmp\0".as_ptr() as *const i8,
+            c"tmpfs".as_ptr(),
+            c"/tmp".as_ptr(),
+            c"tmpfs".as_ptr(),
             0,
             std::ptr::null_mut(),
         )
@@ -273,8 +277,9 @@ fn setup_cgroups() {
     let _ = fs::create_dir_all("/sys/fs/cgroup");
     let ret = unsafe {
         libc::mount(
-            b"cgroup2\0".as_ptr() as *const i8,
-            b"/sys/fs/cgroup\0".as_ptr() as *const i8,
+            c"cgroup2".as_ptr(),
+            c"/sys/fs/cgroup".as_ptr(),
+            c"cgroup2".as_ptr(),
             0,
             std::ptr::null_mut(),
         )
