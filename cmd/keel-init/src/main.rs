@@ -10,7 +10,6 @@
 //! All errors are handled gracefully - the system will continue running
 //! in a degraded/maintenance mode rather than crashing.
 
-use nix::mount::{mount, MsFlags};
 use nix::sys::stat::{umask, Mode};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
@@ -121,41 +120,61 @@ fn setup_filesystems() -> Result<(), InitError> {
     let _ = fs::create_dir_all("/tmp");
 
     // Mount proc - critical for process management
-    if let Err(e) =
-        mount::<str, str, str, str>(Some("none"), "/proc", Some("proc"), MsFlags::empty(), None)
-    {
-        warn!(error = %e, "Failed to mount /proc");
+    let ret = unsafe {
+        libc::mount(
+            b"proc\0".as_ptr() as *const i8,
+            b"/proc\0".as_ptr() as *const i8,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if ret != 0 {
+        warn!("Failed to mount /proc");
     } else {
         debug!("Mounted /proc");
     }
 
     // Mount sysfs
-    if let Err(e) =
-        mount::<str, str, str, str>(Some("none"), "/sys", Some("sysfs"), MsFlags::empty(), None)
-    {
-        warn!(error = %e, "Failed to mount /sys");
+    let ret = unsafe {
+        libc::mount(
+            b"sysfs\0".as_ptr() as *const i8,
+            b"/sys\0".as_ptr() as *const i8,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if ret != 0 {
+        warn!("Failed to mount /sys");
     } else {
         debug!("Mounted /sys");
     }
 
     // Mount devtmpfs - critical for device access
-    if let Err(e) = mount::<str, str, str, str>(
-        Some("none"),
-        "/dev",
-        Some("devtmpfs"),
-        MsFlags::empty(),
-        None,
-    ) {
-        warn!(error = %e, "Failed to mount /dev");
+    let ret = unsafe {
+        libc::mount(
+            b"devtmpfs\0".as_ptr() as *const i8,
+            b"/dev\0".as_ptr() as *const i8,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if ret != 0 {
+        warn!("Failed to mount /dev");
     } else {
         debug!("Mounted /dev");
     }
 
     // Mount tmpfs
-    if let Err(e) =
-        mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None)
-    {
-        warn!(error = %e, "Failed to mount /tmp");
+    let ret = unsafe {
+        libc::mount(
+            b"tmpfs\0".as_ptr() as *const i8,
+            b"/tmp\0".as_ptr() as *const i8,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if ret != 0 {
+        warn!("Failed to mount /tmp");
     } else {
         debug!("Mounted /tmp");
     }
@@ -252,15 +271,18 @@ fn check_test_mode() {
 /// Setup cgroup v2 filesystem
 fn setup_cgroups() {
     let _ = fs::create_dir_all("/sys/fs/cgroup");
-    match mount::<str, str, str, str>(
-        Some("cgroup2"),
-        "/sys/fs/cgroup",
-        Some("cgroup2"),
-        MsFlags::empty(),
-        None,
-    ) {
-        Ok(_) => debug!("Mounted cgroup v2 at /sys/fs/cgroup"),
-        Err(e) => warn!(error = %e, "Failed to mount cgroup v2"),
+    let ret = unsafe {
+        libc::mount(
+            b"cgroup2\0".as_ptr() as *const i8,
+            b"/sys/fs/cgroup\0".as_ptr() as *const i8,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if ret == 0 {
+        debug!("Mounted cgroup v2 at /sys/fs/cgroup");
+    } else {
+        warn!("Failed to mount cgroup v2");
     }
 }
 

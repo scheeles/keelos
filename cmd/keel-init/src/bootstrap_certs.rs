@@ -107,6 +107,7 @@ fn display_bootstrap_instructions() {
 
 /// Clean up bootstrap certificates after Kubernetes bootstrapping
 /// This should be called after the node successfully joins a Kubernetes cluster
+#[allow(dead_code)]
 pub fn cleanup_bootstrap_certificates() -> Result<(), Box<dyn std::error::Error>> {
     let cert_dir = Path::new(BOOTSTRAP_CERT_DIR);
 
