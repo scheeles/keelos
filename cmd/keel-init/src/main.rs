@@ -26,6 +26,9 @@ mod telemetry;
 
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
 fn main() {
+    // Raw print to confirm stdout works
+    println!("DEBUG: Init process starting...");
+
     // Initialize tracing subscriber for structured logging
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::INFO)
@@ -38,7 +41,10 @@ fn main() {
     let _ = tracing::subscriber::set_global_default(subscriber);
 
     info!("Welcome to KeelOS v0.1");
+    println!("DEBUG: Tracing initialized");
     info!("Init process started (PID 1)");
+
+    println!("DEBUG: About to run main loop");
 
     if let Err(e) = run() {
         error!(error = %e, "Init encountered a fatal error");
@@ -112,6 +118,7 @@ impl std::error::Error for InitError {}
 
 /// Mount essential API filesystems (/proc, /sys, /dev, /tmp)
 fn setup_filesystems() -> Result<(), InitError> {
+    println!("DEBUG: Entering setup_filesystems");
     info!("Mounting API filesystems");
 
     // Ensure directories exist (ignore errors - they may already exist)
@@ -122,6 +129,7 @@ fn setup_filesystems() -> Result<(), InitError> {
 
     // Mount proc - critical for process management
     // Mount proc - critical for process management
+    println!("DEBUG: Mounting /proc...");
     match mount(
         Some("proc"),
         "/proc",
@@ -129,7 +137,10 @@ fn setup_filesystems() -> Result<(), InitError> {
         MsFlags::empty(),
         None::<&str>,
     ) {
-        Ok(_) => debug!("Mounted /proc"),
+        Ok(_) => {
+            println!("DEBUG: Mounted /proc successfully");
+            debug!("Mounted /proc")
+        },
         Err(e) => warn!(error = %e, "Failed to mount /proc"),
     }
 
