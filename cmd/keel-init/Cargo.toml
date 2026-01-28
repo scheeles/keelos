@@ -8,11 +8,6 @@ libc = "0.2"
 nix = { version = "0.27", features = ["mount", "fs", "process"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "json"] }
-
-# OpenTelemetry for boot-time telemetry
-opentelemetry = "0.21"
-opentelemetry_sdk = { version = "0.21", features = ["rt-tokio"] }
-tracing-opentelemetry = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
