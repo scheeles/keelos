@@ -1,0 +1,25 @@
+# Security audit configuration
+# This file allows specific advisories that are not critical or
+# are waiting for upstream dependency updates
+
+[advisories]
+# Allow ring 0.16.20 AES overflow vulnerability
+# This is a transitive dependency through: rcgen -> x509-parser -> ring
+# The issue is an AES panic when overflow checking is enabled,
+# which doesn't affect our certificate generation use case.
+# We'll upgrade when rcgen/x509-parser update to ring 0.17+
+ignore = [
+    "RUSTSEC-2025-0009",  # ring AES overflow issue
+]
+
+# Allow unmaintained crate warnings for now
+# These are from kube dependencies and will be addressed
+# when kube updates its dependencies
+[advisories.unmaintained]
+ignore = [
+    "RUSTSEC-2025-0012",  # backoff unmaintained
+    "RUSTSEC-2024-0388",  # derivative unmaintained  
+    "RUSTSEC-2024-0384",  # instant unmaintained
+    "RUSTSEC-2025-0010",  # ring 0.16 unmaintained
+    "RUSTSEC-2025-0134",  # rustls-pemfile unmaintained
+]
