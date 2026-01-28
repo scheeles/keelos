@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     cmake \
     clang \
     pkg-config \
+    perl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GRUB only on x86_64 (not available on ARM)
