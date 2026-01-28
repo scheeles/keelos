@@ -76,6 +76,7 @@ if [ ! -f "${TARGET_DIR}/keel-init" ]; then
 else
     echo "Copying keel-init to /init..."
     cp "${TARGET_DIR}/keel-init" "${INITRAMFS_DIR}/init"
+    chmod +x "${INITRAMFS_DIR}/init"
 
     if [ -f "${TARGET_DIR}/keel-agent" ]; then
         echo "Copying keel-agent to /usr/bin/keel-agent..."
