@@ -20,7 +20,15 @@ mkdir -p "${INITRAMFS_DIR}/opt/cni/bin"
 mkdir -p "${INITRAMFS_DIR}/var/lib/containerd"
 mkdir -p "${INITRAMFS_DIR}/run/containerd"
 mkdir -p "${INITRAMFS_DIR}/etc/containerd"
+mkdir -p "${INITRAMFS_DIR}/lib"
 mkdir -p "${OUTPUT_DIR}"
+
+# Copy musl dynamic linker if it exists (needed even for "static" musl binaries)
+if [ -f "/lib/x86_64-linux-musl/libc.so" ]; then
+    cp -L "/lib/x86_64-linux-musl/libc.so" "${INITRAMFS_DIR}/lib/ld-musl-x86_64.so.1"
+elif [ -f "/usr/lib/x86_64-linux-musl/libc.so" ]; then
+    cp -L "/usr/lib/x86_64-linux-musl/libc.so" "${INITRAMFS_DIR}/lib/ld-musl-x86_64.so.1"
+fi
 
 echo ">>> Copying external binaries..."
 # These come from the build container's /usr/local/bin or /usr/local/sbin
