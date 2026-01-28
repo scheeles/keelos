@@ -21,6 +21,9 @@ use std::{thread, time};
 use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
+#[global_allocator]
+static ALLOC: std::alloc::System = std::alloc::System;
+
 mod bootstrap_certs;
 mod telemetry;
 
