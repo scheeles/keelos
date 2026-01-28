@@ -17,7 +17,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Certificate generation
-openssl = "0.10"
+openssl = { version = "0.10", features = ["vendored"] }
 rcgen = { version = "0.12", features = ["pem", "x509-parser"] }
 time = "0.3"
 

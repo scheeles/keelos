@@ -37,7 +37,7 @@ sysinfo = "0.30"
 async-trait = "0.1"
 
 # Certificate signing for bootstrap
-openssl = "0.10"
+openssl = { version = "0.10", features = ["vendored"] }
 rcgen = { version = "0.12", features = ["pem", "x509-parser"] }
 time = "0.3"
 
