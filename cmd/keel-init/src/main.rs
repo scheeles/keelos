@@ -140,7 +140,7 @@ fn setup_filesystems() -> Result<(), InitError> {
         Ok(_) => {
             println!("DEBUG: Mounted /proc successfully");
             debug!("Mounted /proc")
-        },
+        }
         Err(e) => warn!(error = %e, "Failed to mount /proc"),
     }
 
