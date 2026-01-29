@@ -637,7 +637,7 @@ impl NodeService for HelperNodeService {
         // If cluster CA provided, store it too
         if !req.cluster_ca_pem.is_empty() {
             let ca_path = "/var/lib/keel/crypto/cluster-ca.pem";
-            std::fs::write(&ca_path, &req.cluster_ca_pem)
+            std::fs::write(ca_path, &req.cluster_ca_pem)
                 .map_err(|e| Status::internal(format!("Failed to write cluster CA: {}", e)))?;
             info!(path = %ca_path, "Cluster CA certificate stored");
         }

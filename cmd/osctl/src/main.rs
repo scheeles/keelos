@@ -2,9 +2,8 @@ use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
     BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetCertificateInfoRequest,
-    GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
-    InitKubeconfigRequest, InstallUpdateRequest, RebootRequest, RotateCertificateRequest,
-    TriggerRollbackRequest,
+    GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest,
+    RebootRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -323,7 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
         }
-        Commands::Init { mode } => {
+        Commands::Init { mode: _ } => {
             // TODO: Implement init command with bootstrap and kubeconfig modes
             eprintln!("Init command is not yet fully implemented");
             std::process::exit(1);
@@ -364,7 +363,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Commands::RotateCert { auto_approve } => {
+        Commands::RotateCert { auto_approve: _ } => {
             // TODO: Implement certificate rotation
             eprintln!("Certificate rotation is not yet fully implemented");
             std::process::exit(1);
