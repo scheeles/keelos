@@ -164,8 +164,8 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
     let issuer = cert.issuer().to_string();
 
     let validity = cert.validity();
-    let not_before = validity.not_before.to_rfc2822().map_err(|e| CryptoError::Cert(e))?;
-    let not_after = validity.not_after.to_rfc2822().map_err(|e| CryptoError::Cert(e))?;
+    let not_before = validity.not_before.to_rfc2822().map_err(CryptoError::Cert)?;
+    let not_after = validity.not_after.to_rfc2822().map_err(CryptoError::Cert)?;
 
     // Check expiry
     let now = ::time::OffsetDateTime::now_utc();
