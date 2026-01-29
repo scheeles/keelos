@@ -22,10 +22,12 @@ pub fn init_telemetry(
     otlp_endpoint: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create resource with service information
-    let resource = Resource::new(vec![
-        KeyValue::new("service.name", service_name.to_string()),
-        KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-    ]);
+    let resource = Resource::builder()
+        .with_attributes(vec![
+            KeyValue::new("service.name", service_name.to_string()),
+            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+        ])
+        .build();
 
     // Initialize tracing if OTLP endpoint is provided
     let tracer = if let Some(endpoint) = otlp_endpoint {
@@ -38,7 +40,7 @@ pub fn init_telemetry(
                         .with_endpoint(endpoint),
                 )
                 .with_trace_config(
-                    opentelemetry_sdk::trace::config().with_resource(resource.clone()),
+                    opentelemetry_sdk::trace::Config::default().with_resource(resource.clone()),
                 )
                 .install_batch(runtime::Tokio)?,
         )
