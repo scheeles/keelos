@@ -615,6 +615,77 @@ impl NodeService for HelperNodeService {
     }
 }
 
+/// Initialize operational certificates if running in Kubernetes
+/// Returns (cert_path, key_path) if successful, None if not in K8s or on error
+async fn init_k8s_certificates() -> Option<(String, String)> {
+    use k8s_csr::K8sCsrManager;
+
+    // Check if we're running in Kubernetes
+    if !std::path::Path::new("/var/run/secrets/kubernetes.io/serviceaccount/token").exists() {
+        info!("Not running in Kubernetes, skipping operational certificate initialization");
+        return None;
+    }
+
+    // Get node name from environment or hostname
+    let node_name = std::env::var("NODE_NAME")
+        .ok()
+        .or_else(|| hostname::get().ok().and_then(|h| h.into_string().ok()))?;
+
+    info!(
+        "Initializing operational certificates for node: {}",
+        node_name
+    );
+
+    // Check if we already have valid operational certificates
+    let cert_path = "/var/lib/keel/crypto/operational.pem";
+    let key_path = "/var/lib/keel/crypto/operational.key";
+
+    if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
+        // TODO: Check certificate expiry and renew if needed
+        info!("Operational certificates already exist, using existing certs");
+        return Some((cert_path.to_string(), key_path.to_string()));
+    }
+
+    // Create K8s CSR manager and request certificate
+    match K8sCsrManager::new(node_name).await {
+        Ok(csr_manager) => {
+            info!("Requesting operational certificate from Kubernetes...");
+
+            match csr_manager.request_certificate().await {
+                Ok((cert_pem, key_pem)) => {
+                    // Store the certificates
+                    if let Err(e) = std::fs::create_dir_all("/var/lib/keel/crypto") {
+                        warn!("Failed to create crypto directory: {}", e);
+                        return None;
+                    }
+
+                    if let Err(e) = std::fs::write(cert_path, &cert_pem) {
+                        warn!("Failed to write operational certificate: {}", e);
+                        return None;
+                    }
+
+                    if let Err(e) = std::fs::write(key_path, &key_pem) {
+                        warn!("Failed to write operational key: {}", e);
+                        return None;
+                    }
+
+                    info!("✓ Successfully obtained and stored operational certificates");
+                    Some((cert_path.to_string(), key_path.to_string()))
+                }
+                Err(e) => {
+                    warn!("Failed to request operational certificate: {}", e);
+                    info!("Agent will use bootstrap certificates if available");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to initialize K8s CSR manager: {}", e);
+            None
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize OpenTelemetry telemetry
@@ -643,6 +714,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
+
+    // Initialize K8s operational certificates if running in cluster
+    if let Some((cert_path, key_path)) = init_k8s_certificates().await {
+        info!("K8s operational certificates initialized:");
+        info!("  Cert: {}", cert_path);
+        info!("  Key: {}", key_path);
+    }
 
     // Load declarative configuration
     let config_path = "/etc/keel/node.yaml";
