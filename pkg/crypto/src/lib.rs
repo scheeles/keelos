@@ -94,8 +94,16 @@ pub fn generate_bootstrap_cert(
 
     // Add subject alternative names
     params.subject_alt_names = vec![
-        SanType::DnsName(common_name.try_into().map_err(|e: rcgen::Error| CryptoError::Cert(e.to_string()))?),
-        SanType::DnsName("localhost".try_into().map_err(|e: rcgen::Error| CryptoError::Cert(e.to_string()))?),
+        SanType::DnsName(
+            common_name
+                .try_into()
+                .map_err(|e: rcgen::Error| CryptoError::Cert(e.to_string()))?,
+        ),
+        SanType::DnsName(
+            "localhost"
+                .try_into()
+                .map_err(|e: rcgen::Error| CryptoError::Cert(e.to_string()))?,
+        ),
         SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
     ];
 
@@ -155,7 +163,8 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
     }
 
     let pem_data = fs::read_to_string(path_ref)?;
-    let pem = ::pem::parse(&pem_data).map_err(|e: ::pem::PemError| CryptoError::Cert(e.to_string()))?;
+    let pem =
+        ::pem::parse(&pem_data).map_err(|e: ::pem::PemError| CryptoError::Cert(e.to_string()))?;
 
     let (_, cert) = X509Certificate::from_der(pem.contents())
         .map_err(|e| CryptoError::X509Parse(e.to_string()))?;
@@ -164,7 +173,10 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
     let issuer = cert.issuer().to_string();
 
     let validity = cert.validity();
-    let not_before = validity.not_before.to_rfc2822().map_err(CryptoError::Cert)?;
+    let not_before = validity
+        .not_before
+        .to_rfc2822()
+        .map_err(CryptoError::Cert)?;
     let not_after = validity.not_after.to_rfc2822().map_err(CryptoError::Cert)?;
 
     // Check expiry
