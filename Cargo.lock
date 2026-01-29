@@ -1358,11 +1358,12 @@ dependencies = [
  "keel-config",
  "keel-crypto",
  "kube",
+ "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "prost 0.12.6",
- "rcgen",
+ "rcgen 0.12.1",
  "reqwest",
  "serde",
  "serde_json",
@@ -1409,7 +1410,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "pem",
- "rcgen",
+ "rcgen 0.13.2",
  "rustls 0.23.36",
  "rustls-pemfile 2.2.0",
  "serde",
@@ -2177,6 +2178,18 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "rcgen"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48406db8ac1f3cbc7dcdb56ec355343817958a356ff430259bb07baf7607e1e1"
+dependencies = [
+ "pem",
+ "ring",
+ "time",
+ "yasna",
 ]
 
 [[package]]

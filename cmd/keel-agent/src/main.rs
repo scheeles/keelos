@@ -30,6 +30,7 @@ use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+mod cert_metrics;
 mod cert_renewal;
 mod disk;
 mod health;

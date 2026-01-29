@@ -1,3 +1,4 @@
+use crate::cert_metrics::cert_metrics;
 use crate::k8s_csr::K8sCsrManager;
 use keel_crypto::{check_cert_needs_renewal, parse_cert_expiry};
 use std::sync::Arc;
@@ -87,9 +88,23 @@ impl CertRenewalManager {
                 expiry.format("%Y-%m-%d %H:%M:%S UTC")
             );
 
-            self.trigger_renewal().await?;
+            match self.trigger_renewal().await {
+                Ok(_) => {
+                    // Record successful renewal
+                    cert_metrics().record_renewal_success("operational");
+                    // Update expiry metrics with new cert
+                    cert_metrics().update_cert_expiry(&self.cert_path);
+                }
+                Err(e) => {
+                    // Record renewal error
+                    cert_metrics().record_renewal_error("operational", &e);
+                    return Err(e);
+                }
+            }
         } else {
             debug!("Certificate is valid, no renewal needed");
+            // Update metrics even when not renewing
+            cert_metrics().update_cert_expiry(&self.cert_path);
         }
 
         Ok(())
