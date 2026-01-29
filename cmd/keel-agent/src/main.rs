@@ -560,7 +560,8 @@ impl NodeService for HelperNodeService {
             node_name: config.node_name,
             kubeconfig_path: config.kubeconfig_path,
             bootstrapped_at: config.bootstrapped_at,
-        }))\n    }
+        })))
+    }
 
     async fn init_bootstrap(
         &self,

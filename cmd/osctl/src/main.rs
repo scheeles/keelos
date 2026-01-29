@@ -3,8 +3,8 @@ use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
     BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetCertificateInfoRequest,
     GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
-    InitKubeconfigRequest, InstallUpdateRequest, RebootRequest,
-    RotateCertificateRequest, TriggerRollbackRequest,
+    InitKubeconfigRequest, InstallUpdateRequest, RebootRequest, RotateCertificateRequest,
+    TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
