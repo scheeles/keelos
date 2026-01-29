@@ -30,6 +30,12 @@ service NodeService {
   // Get rollback history
   rpc GetRollbackHistory (GetRollbackHistoryRequest) returns (GetRollbackHistoryResponse);
   
+  // Bootstrap certificate initialization (unauthenticated)
+  rpc InitBootstrap (InitBootstrapRequest) returns (InitBootstrapResponse);
+  
+  // Rotate operational certificate (triggers new K8s CSR)
+  rpc RotateCertificate (RotateCertificateRequest) returns (RotateCertificateResponse);
+  
   // Bootstrap Kubernetes cluster joining
   rpc BootstrapKubernetes (BootstrapKubernetesRequest) returns (BootstrapKubernetesResponse);
   
@@ -231,4 +237,30 @@ message GetBootstrapStatusResponse {
   
   // Bootstrap timestamp (RFC3339)
   string bootstrapped_at = 5;
+}
+
+// Bootstrap certificate initialization messages
+message InitBootstrapRequest {
+  // Client's self-signed bootstrap certificate in PEM format (24h validity)  
+  string client_cert_pem = 1;
+}
+
+message InitBootstrapResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Certificate rotation messages
+message RotateCertificateRequest {
+  // Force rotation even if current cert is valid
+  bool force = 1;
+}
+
+message RotateCertificateResponse {
+  bool success = 1;
+  string message = 2;
+  // Path to new certificate
+  string cert_path = 3;
+  // Certificate expiry time (RFC3339)
+  string expires_at = 4;
 }

@@ -1,0 +1,45 @@
+# Kubernetes RBAC for keel-agent CSR Management
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keel-agent
+  namespace: keel-system
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keel-agent-csr
+rules:
+# Allow creating and reading CertificateSigningRequests
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests"]
+  verbs: ["create", "get", "list", "watch", "delete"]
+
+# Allow approving CSRs (requires cluster-admin or delegated approval rights)
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests/approval"]
+  verbs: ["update"]
+
+# Allow signing CSRs for kube-apiserver-client signer
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["signers"]
+  resourceNames: ["kubernetes.io/kube-apiserver-client"]
+  verbs: ["approve"]
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keel-agent-csr
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: keel-agent-csr
+subjects:
+- kind: ServiceAccount
+  name: keel-agent
+  namespace: keel-system

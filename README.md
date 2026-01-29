@@ -76,7 +76,28 @@ osctl update \
   --full-image-url http://update-server/os-v1.1.squashfs
 ```
 
-Join a Kubernetes cluster:
+### Certificate Management
+
+KeelOS provides automatic certificate management with dual-CA support:
+
+**Development (Bootstrap Certificates):**
+```bash
+# Generate 24-hour self-signed certificate
+osctl init bootstrap
+```
+
+**Production (Kubernetes Operational Certificates):**
+```bash
+# Auto-initialized when agent runs in K8s cluster
+# Auto-renews 30 days before expiry
+# Monitored via OpenTelemetry metrics
+```
+
+See [Certificate Management Guide](docs/certificate-management.md) for details.
+
+### Kubernetes Node Bootstrap
+
+Add a KeelOS node to a K8s cluster:
 ```bash
 # Create bootstrap token on control plane
 kubectl create token node-bootstrapper --duration=24h --namespace=kube-system
@@ -84,9 +105,7 @@ kubectl create token node-bootstrapper --duration=24h --namespace=kube-system
 # Extract CA certificate
 kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > ca.crt
 
-# Bootstrap the node
-osctl bootstrap \
-  --api-server https://k8s.example.com:6443 \
+osctl init kubernetes \
   --token <bootstrap-token> \
   --ca-cert ca.crt
 
@@ -99,6 +118,7 @@ kubectl get nodes
 - **[Overview](docs/overview/what-is-keelos.md)**: Introduction, Philosophy, and Security.
 - **[Getting Started](docs/getting-started/quickstart-qemu.md)**: Run KeelOS locally in QEMU.
 - **[Core Concepts](docs/learn-more/architecture.md)**: Architecture, API-Management, and Immutability.
+- **[Certificate Management](docs/certificate-management.md)**: Auto-renewal, dual-CA, and monitoring.
 - **[Operational Guides](docs/operational-guides/lifecycle-management.md)**: Updates, Rollbacks, and Configuration.
 - **[Platform Installation](docs/platform-installation/local-qemu.md)**: Installation guides for Local, Bare Metal, and Cloud.
 - **[Reference](docs/reference/osctl.md)**: CLI and API Reference.

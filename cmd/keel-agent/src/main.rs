@@ -17,8 +17,9 @@ use keel_api::node::{
     CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
     GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
-    HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
-    RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
+    HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
+    InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, RotateCertificateRequest,
+    RotateCertificateResponse, ScheduleUpdateRequest, ScheduleUpdateResponse,
     TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
     UpdateSchedule as ProtoUpdateSchedule,
 };
@@ -29,15 +30,20 @@ use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+mod cert_metrics;
+mod cert_renewal;
 mod disk;
 mod health;
 mod health_check;
 mod hooks;
+mod k8s_csr;
+mod mtls;
 mod telemetry;
 mod update_scheduler;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
+use mtls::TlsManager;
 use update_scheduler::{ScheduleStatus, UpdateScheduler};
 
 #[derive(Clone)]
@@ -558,6 +564,213 @@ impl NodeService for HelperNodeService {
             bootstrapped_at: config.bootstrapped_at,
         }))
     }
+
+    async fn init_bootstrap(
+        &self,
+        request: Request<InitBootstrapRequest>,
+    ) -> Result<Response<InitBootstrapResponse>, Status> {
+        let req = request.into_inner();
+
+        info!("Received bootstrap certificate initialization request");
+
+        // Validate the client certificate PEM
+        if let Err(e) = keel_crypto::validate_bootstrap_cert(&req.client_cert_pem) {
+            warn!("Invalid bootstrap certificate: {}", e);
+            return Ok(Response::new(InitBootstrapResponse {
+                success: false,
+                message: format!("Invalid certificate: {}", e),
+            }));
+        }
+
+        // Store the client's public certificate in trusted clients directory
+        let cert_dir = std::path::Path::new("/var/lib/keel/crypto/trusted-clients/bootstrap");
+        if let Err(e) = std::fs::create_dir_all(cert_dir) {
+            error!("Failed to create cert directory: {}", e);
+            return Ok(Response::new(InitBootstrapResponse {
+                success: false,
+                message: format!("Failed to create cert directory: {}", e),
+            }));
+        }
+
+        // Generate a unique filename based on cert hash
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        req.client_cert_pem.hash(&mut hasher);
+        let cert_hash = hasher.finish();
+
+        let cert_path = cert_dir.join(format!("client-{:x}.pem", cert_hash));
+
+        if let Err(e) = std::fs::write(&cert_path, &req.client_cert_pem) {
+            error!("Failed to write certificate: {}", e);
+            return Ok(Response::new(InitBootstrapResponse {
+                success: false,
+                message: format!("Failed to write certificate: {}", e),
+            }));
+        }
+
+        info!("Stored bootstrap certificate: {}", cert_path.display());
+
+        Ok(Response::new(InitBootstrapResponse {
+            success: true,
+            message: "Bootstrap certificate accepted and stored".to_string(),
+        }))
+    }
+
+    async fn rotate_certificate(
+        &self,
+        request: Request<RotateCertificateRequest>,
+    ) -> Result<Response<RotateCertificateResponse>, Status> {
+        use k8s_csr::K8sCsrManager;
+
+        let req = request.into_inner();
+        info!("Certificate rotation requested (force: {})", req.force);
+
+        // Check if running in K8s
+        if !std::path::Path::new("/var/run/secrets/kubernetes.io/serviceaccount/token").exists() {
+            return Err(Status::failed_precondition(
+                "Not running in Kubernetes - rotation only available in K8s clusters",
+            ));
+        }
+
+        // Get node name
+        let node_name = std::env::var("NODE_NAME")
+            .ok()
+            .or_else(|| hostname::get().ok().and_then(|h| h.into_string().ok()))
+            .ok_or_else(|| Status::internal("Failed to determine node name"))?;
+
+        info!("Rotating certificate for node: {}", node_name);
+
+        // Create K8s CSR manager and request new certificate
+        let csr_manager = K8sCsrManager::new(node_name)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to initialize CSR manager: {}", e)))?;
+
+        match csr_manager.request_certificate().await {
+            Ok((cert_pem, key_pem)) => {
+                // Store new certificates
+                let cert_path = "/var/lib/keel/crypto/operational.pem";
+                let key_path = "/var/lib/keel/crypto/operational.key";
+
+                // Create backup of old certificates
+                if std::path::Path::new(cert_path).exists() {
+                    let backup_cert = format!("{}.backup", cert_path);
+                    let backup_key = format!("{}.backup", key_path);
+                    if let Err(e) = std::fs::copy(cert_path, &backup_cert) {
+                        warn!("Failed to backup old certificate: {}", e);
+                    }
+                    if let Err(e) = std::fs::copy(key_path, &backup_key) {
+                        warn!("Failed to backup old key: {}", e);
+                    }
+                    info!("Backed up old certificates");
+                }
+
+                // Write new certificates
+                if let Err(e) = std::fs::write(cert_path, &cert_pem) {
+                    return Err(Status::internal(format!(
+                        "Failed to write new certificate: {}",
+                        e
+                    )));
+                }
+
+                if let Err(e) = std::fs::write(key_path, &key_pem) {
+                    return Err(Status::internal(format!("Failed to write new key: {}", e)));
+                }
+
+                info!("✓ Certificate rotation successful");
+
+                // Parse actual expiry from certificate
+                let expires_at = keel_crypto::parse_cert_expiry(&cert_pem)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|e| {
+                        warn!("Failed to parse certificate expiry: {}", e);
+                        "Unknown".to_string()
+                    });
+
+                Ok(Response::new(RotateCertificateResponse {
+                    success: true,
+                    message: "Certificate rotated successfully".to_string(),
+                    cert_path: cert_path.to_string(),
+                    expires_at,
+                }))
+            }
+            Err(e) => {
+                error!("Certificate rotation failed: {}", e);
+                Err(Status::internal(format!("Rotation failed: {}", e)))
+            }
+        }
+    }
+}
+
+/// Initialize operational certificates if running in Kubernetes
+/// Returns (cert_path, key_path) if successful, None if not in K8s or on error
+async fn init_k8s_certificates() -> Option<(String, String)> {
+    use k8s_csr::K8sCsrManager;
+
+    // Check if we're running in Kubernetes
+    if !std::path::Path::new("/var/run/secrets/kubernetes.io/serviceaccount/token").exists() {
+        info!("Not running in Kubernetes, skipping operational certificate initialization");
+        return None;
+    }
+
+    // Get node name from environment or hostname
+    let node_name = std::env::var("NODE_NAME")
+        .ok()
+        .or_else(|| hostname::get().ok().and_then(|h| h.into_string().ok()))?;
+
+    info!(
+        "Initializing operational certificates for node: {}",
+        node_name
+    );
+
+    // Check if we already have valid operational certificates
+    let cert_path = "/var/lib/keel/crypto/operational.pem";
+    let key_path = "/var/lib/keel/crypto/operational.key";
+
+    if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
+        // TODO: Check certificate expiry and renew if needed
+        info!("Operational certificates already exist, using existing certs");
+        return Some((cert_path.to_string(), key_path.to_string()));
+    }
+
+    // Create K8s CSR manager and request certificate
+    match K8sCsrManager::new(node_name).await {
+        Ok(csr_manager) => {
+            info!("Requesting operational certificate from Kubernetes...");
+
+            match csr_manager.request_certificate().await {
+                Ok((cert_pem, key_pem)) => {
+                    // Store the certificates
+                    if let Err(e) = std::fs::create_dir_all("/var/lib/keel/crypto") {
+                        warn!("Failed to create crypto directory: {}", e);
+                        return None;
+                    }
+
+                    if let Err(e) = std::fs::write(cert_path, &cert_pem) {
+                        warn!("Failed to write operational certificate: {}", e);
+                        return None;
+                    }
+
+                    if let Err(e) = std::fs::write(key_path, &key_pem) {
+                        warn!("Failed to write operational key: {}", e);
+                        return None;
+                    }
+
+                    info!("✓ Successfully obtained and stored operational certificates");
+                    Some((cert_path.to_string(), key_path.to_string()))
+                }
+                Err(e) => {
+                    warn!("Failed to request operational certificate: {}", e);
+                    info!("Agent will use bootstrap certificates if available");
+                    None
+                }
+            }
+        }
+        Err(e) => {
+            warn!("Failed to initialize K8s CSR manager: {}", e);
+            None
+        }
+    }
 }
 
 #[tokio::main]
@@ -589,6 +802,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
 
+    // Initialize K8s operational certificates if running in cluster
+    if let Some((cert_path, key_path)) = init_k8s_certificates().await {
+        info!("K8s operational certificates initialized:");
+        info!("  Cert: {}", cert_path);
+        info!("  Key: {}", key_path);
+    }
+
+    // Start certificate auto-renewal daemon if operational cert exists
+    let operational_cert_path = "/var/lib/keel/crypto/operational.pem";
+    if std::path::Path::new(operational_cert_path).exists() {
+        use cert_renewal::{CertRenewalConfig, CertRenewalManager};
+
+        let renewal_config = CertRenewalConfig {
+            operational_cert_path: operational_cert_path.to_string(),
+            operational_key_path: "/var/lib/keel/crypto/operational.key".to_string(),
+            renewal_threshold_days: 30, // Renew 30 days before expiry
+            check_interval_hours: 24,   // Check once per day
+        };
+
+        let renewal_manager = Arc::new(CertRenewalManager::new(renewal_config));
+
+        tokio::spawn(async move {
+            renewal_manager.start_renewal_loop().await;
+        });
+
+        info!("Certificate auto-renewal enabled (threshold: 30 days, check interval: 24 hours)");
+    }
+
     // Load declarative configuration
     let config_path = "/etc/keel/node.yaml";
     let config = if std::path::Path::new(config_path).exists() {
@@ -603,32 +844,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     info!(hostname = %config.hostname, "Configuration loaded");
 
-    // mTLS setup
-    let cert_path = "/etc/keel/crypto/server.pem";
-    let key_path = "/etc/keel/crypto/server.key";
-    let ca_path = "/etc/keel/crypto/ca.pem";
+    // mTLS setup with dual-CA support
+    // Supports both bootstrap (self-signed) and operational (K8s-signed) certificates
+    let server_cert_path = "/etc/keel/crypto/server.pem";
+    let server_key_path = "/etc/keel/crypto/server.key";
+    let bootstrap_ca_dir = "/var/lib/keel/crypto/trusted-clients/bootstrap";
+    let operational_ca_path = "/etc/keel/crypto/ca.pem";
 
     let mut builder = Server::builder();
 
-    if std::path::Path::new(cert_path).exists() {
-        info!("Enabling mTLS");
-        let cert = std::fs::read_to_string(cert_path)?;
-        let key = std::fs::read_to_string(key_path)?;
-        let client_ca = std::fs::read_to_string(ca_path)?;
+    // Try to configure TLS with dual-CA support
+    let tls_manager = TlsManager::new(
+        server_cert_path.to_string(),
+        server_key_path.to_string(),
+        bootstrap_ca_dir.to_string(),
+        Some(operational_ca_path.to_string()),
+    );
 
-        let identity = tonic::transport::Identity::from_pem(cert, key);
-        let client_ca_cert = tonic::transport::Certificate::from_pem(client_ca);
-
-        let tls_config = tonic::transport::ServerTlsConfig::new()
-            .identity(identity)
-            .client_ca_root(client_ca_cert);
-
-        builder = builder.tls_config(tls_config)?;
+    if tls_manager.can_configure() {
+        info!("Enabling mTLS with dual-CA support (bootstrap + operational)");
+        match tls_manager.build_tls_config() {
+            Ok(tls_config) => {
+                builder = builder.tls_config(tls_config)?;
+                info!("mTLS enabled successfully");
+            }
+            Err(e) => {
+                warn!("Failed to configure TLS: {}. Running without mTLS.", e);
+            }
+        }
     } else {
         warn!(
-            cert_path = cert_path,
-            "Running without TLS - certificates not found"
+            "Server certificates not found at {}. Running without mTLS.",
+            server_cert_path
         );
+        info!("To enable mTLS, generate server certificate and key.");
     }
 
     // Start health/metrics HTTP server
