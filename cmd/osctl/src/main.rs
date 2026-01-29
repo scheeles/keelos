@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
-    BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetHealthRequest,
+    BootstrapKubernetesRequest, ConfigureNetworkRequest, DhcpConfig, DnsConfig,
+    GetBootstrapStatusRequest, GetHealthRequest, GetNetworkConfigRequest, GetNetworkStatusRequest,
     GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest, InstallUpdateRequest,
-    RebootRequest, TriggerRollbackRequest,
+    NetworkInterface, RebootRequest, StaticConfig, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -81,6 +82,70 @@ enum Commands {
     },
     /// Get Kubernetes bootstrap status
     BootstrapStatus,
+    /// Network management commands
+    Network {
+        #[command(subcommand)]
+        action: NetworkAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum NetworkAction {
+    /// Configure network settings
+    Config {
+        #[command(subcommand)]
+        action: NetworkConfigAction,
+    },
+    /// Show network status
+    Status,
+    /// Configure DNS settings
+    Dns {
+        #[command(subcommand)]
+        action: DnsAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum NetworkConfigAction {
+    /// Set network configuration
+    Set {
+        /// Interface name (e.g., eth0, ens3)
+        #[arg(long)]
+        interface: String,
+        /// Use DHCP for this interface
+        #[arg(long, conflicts_with_all = ["ip", "gateway"])]
+        dhcp: bool,
+        /// Static IP address in CIDR notation (e.g., 192.168.1.10/24)
+        #[arg(long)]
+        ip: Option<String>,
+        /// Gateway IP address
+        #[arg(long)]
+        gateway: Option<String>,
+        /// MTU (default: 1500)
+        #[arg(long)]
+        mtu: Option<u32>,
+        /// Auto-reboot after configuration
+        #[arg(long)]
+        auto_reboot: bool,
+    },
+    /// Show current network configuration
+    Show,
+}
+
+#[derive(Subcommand)]
+enum DnsAction {
+    /// Set DNS nameservers
+    Set {
+        /// DNS nameservers (can be specified multiple times)
+        #[arg(long, required = true)]
+        nameserver: Vec<String>,
+        /// DNS search domains
+        #[arg(long)]
+        search: Vec<String>,
+        /// Auto-reboot after configuration
+        #[arg(long)]
+        auto_reboot: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -364,6 +429,192 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
         }
+        Commands::Network { action } => match action {
+            NetworkAction::Config { action } => match action {
+                NetworkConfigAction::Set {
+                    interface,
+                    dhcp,
+                    ip,
+                    gateway,
+                    mtu,
+                    auto_reboot,
+                } => {
+                    // Build network interface configuration
+                    let iface_config = if *dhcp {
+                        Some(keel_api::node::network_interface::Config::Dhcp(
+                            DhcpConfig { enabled: true },
+                        ))
+                    } else if let Some(ip_addr) = ip {
+                        Some(keel_api::node::network_interface::Config::Static(
+                            StaticConfig {
+                                ipv4_address: ip_addr.clone(),
+                                gateway: gateway.clone().unwrap_or_default(),
+                                mtu: mtu.unwrap_or(1500),
+                            },
+                        ))
+                    } else {
+                        eprintln!("Error: Either --dhcp or --ip must be specified");
+                        std::process::exit(1);
+                    };
+
+                    let request = tonic::Request::new(ConfigureNetworkRequest {
+                        interfaces: vec![NetworkInterface {
+                            name: interface.clone(),
+                            config: iface_config,
+                        }],
+                        dns: None,
+                        routes: vec![],
+                        auto_reboot: *auto_reboot,
+                    });
+
+                    println!("🌐 Configuring network interface '{}'...", interface);
+                    let response = client.configure_network(request).await?;
+                    let result = response.into_inner();
+
+                    if result.success {
+                        println!("✅ {}", result.message);
+                        if result.reboot_required && !auto_reboot {
+                            println!("\n⚠️  Reboot required for changes to take effect");
+                            println!("   Run: osctl reboot");
+                        }
+                    } else {
+                        eprintln!("❌ Configuration failed: {}", result.message);
+                        std::process::exit(1);
+                    }
+                }
+                NetworkConfigAction::Show => {
+                    let request = tonic::Request::new(GetNetworkConfigRequest {});
+                    let response = client.get_network_config(request).await?;
+                    let config = response.into_inner();
+
+                    if config.interfaces.is_empty() {
+                        println!("No network configuration found (using DHCP fallback)");
+                    } else {
+                        println!("\n📡 Network Configuration:\n");
+                        for iface in config.interfaces {
+                            println!("Interface: {}", iface.name);
+                            if let Some(cfg) = iface.config {
+                                match cfg {
+                                    keel_api::node::network_interface::Config::Dhcp(_) => {
+                                        println!("  Type: DHCP");
+                                    }
+                                    keel_api::node::network_interface::Config::Static(s) => {
+                                        println!("  Type: Static");
+                                        println!("  IP: {}", s.ipv4_address);
+                                        if !s.gateway.is_empty() {
+                                            println!("  Gateway: {}", s.gateway);
+                                        }
+                                        println!("  MTU: {}", s.mtu);
+                                    }
+                                    keel_api::node::network_interface::Config::Vlan(v) => {
+                                        println!("  Type: VLAN");
+                                        println!("  Parent: {}", v.parent);
+                                        println!("  VLAN ID: {}", v.vlan_id);
+                                    }
+                                    keel_api::node::network_interface::Config::Bond(b) => {
+                                        println!("  Type: Bond");
+                                        println!("  Mode: {}", b.mode);
+                                        println!("  Slaves: {}", b.slaves.join(", "));
+                                    }
+                                }
+                            }
+                            println!();
+                        }
+
+                        if let Some(dns) = config.dns {
+                            println!("DNS Configuration:");
+                            println!("  Nameservers: {}", dns.nameservers.join(", "));
+                            if !dns.search_domains.is_empty() {
+                                println!("  Search domains: {}", dns.search_domains.join(", "));
+                            }
+                            println!();
+                        }
+
+                        if !config.routes.is_empty() {
+                            println!("Custom Routes:");
+                            for route in config.routes {
+                                print!("  {} via {}", route.destination, route.gateway);
+                                if route.metric > 0 {
+                                    print!(" (metric: {})", route.metric);
+                                }
+                                println!();
+                            }
+                        }
+                    }
+                }
+            },
+            NetworkAction::Status => {
+                let request = tonic::Request::new(GetNetworkStatusRequest {});
+                let response = client.get_network_status(request).await?;
+                let status = response.into_inner();
+
+                if status.interfaces.is_empty() {
+                    println!("No network interfaces found");
+                } else {
+                    println!("\n🌐 Network Status:\n");
+                    for iface in status.interfaces {
+                        let state_icon = match iface.state.as_str() {
+                            "up" => "🟢",
+                            "down" => "🔴",
+                            _ => "⚪",
+                        };
+                        println!("{} {} ({})", state_icon, iface.name, iface.state);
+                        println!("  MAC: {}", iface.mac_address);
+                        println!("  MTU: {}", iface.mtu);
+
+                        if !iface.ipv4_addresses.is_empty() {
+                            println!("  IPv4: {}", iface.ipv4_addresses.join(", "));
+                        }
+
+                        if let Some(stats) = iface.statistics {
+                            let rx_mb = stats.rx_bytes as f64 / (1024.0 * 1024.0);
+                            let tx_mb = stats.tx_bytes as f64 / (1024.0 * 1024.0);
+                            println!(
+                                "  RX: {:.2} MB ({} packets, {} errors)",
+                                rx_mb, stats.rx_packets, stats.rx_errors
+                            );
+                            println!(
+                                "  TX: {:.2} MB ({} packets, {} errors)",
+                                tx_mb, stats.tx_packets, stats.tx_errors
+                            );
+                        }
+                        println!();
+                    }
+                }
+            }
+            NetworkAction::Dns { action } => match action {
+                DnsAction::Set {
+                    nameserver,
+                    search,
+                    auto_reboot,
+                } => {
+                    let request = tonic::Request::new(ConfigureNetworkRequest {
+                        interfaces: vec![],
+                        dns: Some(DnsConfig {
+                            nameservers: nameserver.clone(),
+                            search_domains: search.clone(),
+                        }),
+                        routes: vec![],
+                        auto_reboot: *auto_reboot,
+                    });
+
+                    println!("🌐 Configuring DNS...");
+                    let response = client.configure_network(request).await?;
+                    let result = response.into_inner();
+
+                    if result.success {
+                        println!("✅ {}", result.message);
+                        if result.reboot_required && !auto_reboot {
+                            println!("\n⚠️  Reboot required for changes to take effect");
+                            println!("   Run: osctl reboot");
+                        }
+                    } else {
+                        eprintln!("❌ Configuration failed: {}", result.message);
+                        std::process::exit(1);
+                    }
+                }
+            },
+        },
     }
 
     Ok(())
