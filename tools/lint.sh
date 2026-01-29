@@ -38,3 +38,13 @@ docker run --rm \
     /bin/bash -c "
     cargo clippy --workspace -- -D warnings
 "
+echo ">>> Running cargo fmt in Docker (${IMAGE_NAME})..."
+docker run --rm \
+    -v "${PROJECT_ROOT}:/keelos" \
+    -v "keelos-cargo-cache:/root/.cargo/registry" \
+    -v "keelos-target-cache:/keelos/target" \
+    -w /keelos \
+    "${IMAGE_NAME}" \
+    /bin/bash -c "
+    cargo fmt --all -- --check
+"

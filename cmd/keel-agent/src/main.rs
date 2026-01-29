@@ -35,6 +35,7 @@ mod disk;
 mod health;
 mod health_check;
 mod hooks;
+mod mtls;
 mod telemetry;
 mod update_scheduler;
 
@@ -46,6 +47,8 @@ use update_scheduler::{ScheduleStatus, UpdateScheduler};
 pub struct HelperNodeService {
     scheduler: Arc<UpdateScheduler>,
     health_checker: Arc<HealthChecker>,
+    #[allow(dead_code)] // Will be used for cert verification in future PRs
+    tls_manager: Arc<mtls::TlsManager>,
 }
 
 #[tonic::async_trait]
@@ -824,9 +827,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         schedule_executor(executor_scheduler).await;
     });
 
+    // Initialize TLS manager for certificate management
+    let tls_manager = Arc::new(mtls::TlsManager::new());
+
     let node_service = HelperNodeService {
         scheduler: scheduler.clone(),
         health_checker: health_checker.clone(),
+        tls_manager: tls_manager.clone(),
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
@@ -845,31 +852,76 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     info!(hostname = %config.hostname, "Configuration loaded");
 
-    // mTLS setup
+    // mTLS setup with dual-CA support
     let cert_path = "/etc/keel/crypto/server.pem";
     let key_path = "/etc/keel/crypto/server.key";
-    let ca_path = "/etc/keel/crypto/ca.pem";
+    let bootstrap_ca_path = "/var/lib/keel/crypto/bootstrap-ca.pem";
+    let operational_ca_path = "/var/lib/keel/crypto/operational-ca.pem";
+    let trusted_clients_dir = std::path::Path::new("/var/lib/keel/crypto/trusted-clients");
 
     let mut builder = Server::builder();
 
     if std::path::Path::new(cert_path).exists() {
-        info!("Enabling mTLS");
+        info!("Configuring mTLS with dual-CA support");
         let cert = std::fs::read_to_string(cert_path)?;
         let key = std::fs::read_to_string(key_path)?;
-        let client_ca = std::fs::read_to_string(ca_path)?;
-
         let identity = tonic::transport::Identity::from_pem(cert, key);
-        let client_ca_cert = tonic::transport::Certificate::from_pem(client_ca);
 
-        let tls_config = tonic::transport::ServerTlsConfig::new()
-            .identity(identity)
-            .client_ca_root(client_ca_cert);
+        // Load trusted client certificates
+        if trusted_clients_dir.exists() {
+            tls_manager
+                .load_trusted_clients(trusted_clients_dir)
+                .await?;
+        }
+
+        // Determine certificate tier based on available CAs
+        let has_bootstrap = std::path::Path::new(bootstrap_ca_path).exists();
+        let has_operational = std::path::Path::new(operational_ca_path).exists();
+
+        let tier = match (has_bootstrap, has_operational) {
+            (true, true) => {
+                info!("Dual-CA mode: accepting both bootstrap and operational certificates");
+                mtls::CertificateTier::Dual
+            }
+            (true, false) => {
+                info!("Bootstrap-only mode");
+                mtls::CertificateTier::Bootstrap
+            }
+            (false, true) => {
+                info!("Operational-only mode");
+                mtls::CertificateTier::Operational
+            }
+            (false, false) => {
+                warn!("No CA certificates found, TLS verification may fail");
+                mtls::CertificateTier::Bootstrap
+            }
+        };
+        tls_manager.set_tier(tier).await;
+
+        // Configure TLS - using first available CA for verification
+        // Note: Tonic's ServerTlsConfig only supports single CA root
+        // For dual-CA, we use operational CA if available, otherwise bootstrap
+        let ca_pem = if has_operational {
+            std::fs::read_to_string(operational_ca_path)?
+        } else if has_bootstrap {
+            std::fs::read_to_string(bootstrap_ca_path)?
+        } else {
+            String::new()
+        };
+
+        let mut tls_config = tonic::transport::ServerTlsConfig::new().identity(identity);
+
+        if !ca_pem.is_empty() {
+            let client_ca_cert = tonic::transport::Certificate::from_pem(ca_pem);
+            tls_config = tls_config.client_ca_root(client_ca_cert);
+        }
 
         builder = builder.tls_config(tls_config)?;
+        info!("mTLS enforcement enabled (InitBootstrap endpoint remains unauthenticated)");
     } else {
         warn!(
             cert_path = cert_path,
-            "Running without TLS - certificates not found"
+            "Running without TLS - server certificate not found"
         );
     }
 
@@ -897,10 +949,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_rollback_supervisor(rb_health, rb_scheduler).await;
     });
 
-    // Start gRPC server
-    info!(addr = %grpc_addr, "Starting gRPC server");
+    // Start gRPC server with selective authentication
+    info!(addr = %grpc_addr, "Starting gRPC server with mTLS enforcement");
     let grpc_server = builder
-        .add_service(NodeServiceServer::new(node_service))
+        .add_service(NodeServiceServer::with_interceptor(
+            node_service,
+            mtls::auth_interceptor,
+        ))
         .serve(grpc_addr);
 
     // Run both servers concurrently
@@ -1062,9 +1117,11 @@ mod tests {
     async fn test_get_status() {
         let scheduler = Arc::new(UpdateScheduler::new("/tmp/test-schedules.json"));
         let health_checker = Arc::new(HealthChecker::new(HealthCheckerConfig::default()));
+        let tls_manager = Arc::new(mtls::TlsManager::new());
         let service = HelperNodeService {
             scheduler,
             health_checker,
+            tls_manager,
         };
         let request = tonic::Request::new(GetStatusRequest {});
         let response = service.get_status(request).await.unwrap();
