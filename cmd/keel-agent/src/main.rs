@@ -39,7 +39,6 @@ mod update_scheduler;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
-#[allow(unused_imports)] // TODO: Use TlsManager once mTLS integration is complete
 use mtls::TlsManager;
 use update_scheduler::{ScheduleStatus, UpdateScheduler};
 
@@ -658,32 +657,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     info!(hostname = %config.hostname, "Configuration loaded");
 
-    // mTLS setup
-    let cert_path = "/etc/keel/crypto/server.pem";
-    let key_path = "/etc/keel/crypto/server.key";
-    let ca_path = "/etc/keel/crypto/ca.pem";
+    // mTLS setup with dual-CA support
+    // Supports both bootstrap (self-signed) and operational (K8s-signed) certificates
+    let server_cert_path = "/etc/keel/crypto/server.pem";
+    let server_key_path = "/etc/keel/crypto/server.key";
+    let bootstrap_ca_dir = "/var/lib/keel/crypto/trusted-clients/bootstrap";
+    let operational_ca_path = "/etc/keel/crypto/ca.pem";
 
     let mut builder = Server::builder();
 
-    if std::path::Path::new(cert_path).exists() {
-        info!("Enabling mTLS");
-        let cert = std::fs::read_to_string(cert_path)?;
-        let key = std::fs::read_to_string(key_path)?;
-        let client_ca = std::fs::read_to_string(ca_path)?;
+    // Try to configure TLS with dual-CA support
+    let tls_manager = TlsManager::new(
+        server_cert_path.to_string(),
+        server_key_path.to_string(),
+        bootstrap_ca_dir.to_string(),
+        Some(operational_ca_path.to_string()),
+    );
 
-        let identity = tonic::transport::Identity::from_pem(cert, key);
-        let client_ca_cert = tonic::transport::Certificate::from_pem(client_ca);
-
-        let tls_config = tonic::transport::ServerTlsConfig::new()
-            .identity(identity)
-            .client_ca_root(client_ca_cert);
-
-        builder = builder.tls_config(tls_config)?;
+    if tls_manager.can_configure() {
+        info!("Enabling mTLS with dual-CA support (bootstrap + operational)");
+        match tls_manager.build_tls_config() {
+            Ok(tls_config) => {
+                builder = builder.tls_config(tls_config)?;
+                info!("mTLS enabled successfully");
+            }
+            Err(e) => {
+                warn!("Failed to configure TLS: {}. Running without mTLS.", e);
+            }
+        }
     } else {
         warn!(
-            cert_path = cert_path,
-            "Running without TLS - certificates not found"
+            "Server certificates not found at {}. Running without mTLS.",
+            server_cert_path
         );
+        info!("To enable mTLS, generate server certificate and key.");
     }
 
     // Start health/metrics HTTP server
