@@ -107,33 +107,44 @@ enum InitMode {
     Kubeconfig,
 }
 
+/// Helper to create a TLS-enabled connection if certificates are available
+/// Falls back to HTTP if no certs found
+async fn connect_with_auto_tls(
+    endpoint: &str,
+) -> Result<NodeServiceClient<tonic::transport::Channel>, Box<dyn std::error::Error>> {
+    let node_id = extract_node_from_endpoint(endpoint)?;
+    let cert_store = CertStore::new()?;
+
+    // Try to load saved certificates (prefer operational, fall back to bootstrap)
+    if let Ok((tier, paths)) = cert_store.find_best_cert(&node_id) {
+        eprintln!("🔐 Using {} certificates for mTLS", tier);
+
+        // Load cert and key
+        let cert_pem = std::fs::read_to_string(&paths.cert)?;
+        let key_pem = std::fs::read_to_string(&paths.key)?;
+
+        // Create TLS identity
+        let identity = tonic::transport::Identity::from_pem(cert_pem, key_pem);
+
+        // Configure TLS endpoint
+        let tls_endpoint = tonic::transport::Channel::from_shared(endpoint.to_string())?
+            .tls_config(tonic::transport::ClientTlsConfig::new().identity(identity))?;
+
+        Ok(NodeServiceClient::connect(tls_endpoint).await?)
+    } else {
+        // No certs found, use plain HTTP
+        eprintln!("ℹ️  No certificates found, using HTTP");
+        eprintln!("💡 Run 'osctl init bootstrap --node <ip>' to enable mTLS");
+        Ok(NodeServiceClient::connect(endpoint.to_string()).await?)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let cert_path = "client.pem";
-    let key_path = "client.key";
-    let ca_path = "ca.pem";
-
-    let mut endpoint = tonic::transport::Endpoint::from_shared(cli.endpoint.clone())?;
-
-    if std::path::Path::new(cert_path).exists() {
-        let cert = std::fs::read_to_string(cert_path)?;
-        let key = std::fs::read_to_string(key_path)?;
-        let ca = std::fs::read_to_string(ca_path)?;
-
-        let identity = tonic::transport::Identity::from_pem(cert, key);
-        let ca_cert = tonic::transport::Certificate::from_pem(ca);
-
-        let tls_config = tonic::transport::ClientTlsConfig::new()
-            .identity(identity)
-            .ca_certificate(ca_cert)
-            .domain_name("localhost");
-
-        endpoint = endpoint.tls_config(tls_config)?;
-    }
-
-    let mut client = NodeServiceClient::connect(endpoint).await?;
+    // Auto-load certificates if available, fallback to HTTP
+    let mut client = connect_with_auto_tls(&cli.endpoint).await?;
 
     match &cli.command {
         Commands::Status => {
