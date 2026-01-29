@@ -9,7 +9,6 @@ use std::io::BufReader;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use thiserror::Error;
-use time::{Duration, OffsetDateTime};
 use x509_parser::prelude::*;
 
 #[derive(Error, Debug)]
@@ -20,6 +19,8 @@ pub enum CryptoError {
     Cert(String),
     #[error("X509 parsing error: {0}")]
     X509Parse(String),
+    #[error("rcgen error: {0}")]
+    RcgenError(#[from] rcgen::Error),
 }
 
 /// Certificate information for display
@@ -84,17 +85,17 @@ pub fn generate_bootstrap_cert(
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
 
     // Set validity period
-    let now = OffsetDateTime::now_utc();
-    let not_before = now - Duration::minutes(5); // 5 min grace period
-    let not_after = now + Duration::hours(validity_hours as i64);
+    let now = ::time::OffsetDateTime::now_utc();
+    let not_before = now - ::time::Duration::minutes(5); // 5 min grace period
+    let not_after = now + ::time::Duration::hours(validity_hours as i64);
 
     params.not_before = not_before;
     params.not_after = not_after;
 
     // Add subject alternative names
     params.subject_alt_names = vec![
-        SanType::DnsName(common_name.to_string()),
-        SanType::DnsName("localhost".to_string()),
+        SanType::DnsName(common_name.try_into().map_err(|e: rcgen::Error| CryptoError::Cert(e.to_string()))?),
+        SanType::DnsName("localhost".try_into().map_err(|e: rcgen::Error| CryptoError::Cert(e.to_string()))?),
         SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))),
     ];
 
@@ -105,12 +106,11 @@ pub fn generate_bootstrap_cert(
     dn.push(DnType::OrganizationalUnitName, "Bootstrap");
     params.distinguished_name = dn;
 
-    let cert = params
-        .self_signed(&KeyPair::generate()?)
-        .map_err(|e| CryptoError::Cert(e.to_string()))?;
+    let key_pair = KeyPair::generate()?;
+    let cert = params.self_signed(&key_pair)?;
 
     let cert_pem = cert.pem();
-    let key_pem = cert.key_pair.serialize_pem();
+    let key_pem = key_pair.serialize_pem();
 
     Ok((cert_pem, key_pem))
 }
@@ -129,8 +129,7 @@ pub fn generate_csr(common_name: &str, org: &str) -> Result<(String, String), Cr
 
     let key_pair = KeyPair::generate()?;
     let csr_pem = params
-        .serialize_request(&key_pair)
-        .map_err(|e| CryptoError::Cert(e.to_string()))?
+        .serialize_request(&key_pair)?
         .pem()
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
 
@@ -156,7 +155,7 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
     }
 
     let pem_data = fs::read_to_string(path_ref)?;
-    let pem = pem::parse(&pem_data).map_err(|e| CryptoError::Cert(e.to_string()))?;
+    let pem = ::pem::parse(&pem_data).map_err(|e: ::pem::PemError| CryptoError::Cert(e.to_string()))?;
 
     let (_, cert) = X509Certificate::from_der(pem.contents())
         .map_err(|e| CryptoError::X509Parse(e.to_string()))?;
@@ -169,8 +168,8 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
     let not_after = validity.not_after.to_rfc2822();
 
     // Check expiry
-    let now = OffsetDateTime::now_utc();
-    let expiry_time = OffsetDateTime::from_unix_timestamp(validity.not_after.timestamp())
+    let now = ::time::OffsetDateTime::now_utc();
+    let expiry_time = ::time::OffsetDateTime::from_unix_timestamp(validity.not_after.timestamp())
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
 
     let is_expired = now > expiry_time;
