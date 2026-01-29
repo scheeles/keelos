@@ -20,6 +20,7 @@ mkdir -p "${INITRAMFS_DIR}/opt/cni/bin"
 mkdir -p "${INITRAMFS_DIR}/var/lib/containerd"
 mkdir -p "${INITRAMFS_DIR}/run/containerd"
 mkdir -p "${INITRAMFS_DIR}/etc/containerd"
+mkdir -p "${INITRAMFS_DIR}/lib/modules"
 mkdir -p "${OUTPUT_DIR}"
 
 echo ">>> Copying external binaries..."
@@ -93,7 +94,50 @@ cp /usr/local/bin/busybox "${INITRAMFS_DIR}/bin/busybox"
 ln -sf busybox "${INITRAMFS_DIR}/bin/sh"
 ln -sf busybox "${INITRAMFS_DIR}/bin/ifconfig"
 ln -sf busybox "${INITRAMFS_DIR}/bin/route"
-ln -sf busybox "${INITRAMFS_DIR}/bin/ip"
+
+echo ">>> Copying iproute2 (for advanced networking)..."
+# iproute2 provides full-featured ip command for VLAN, bonding, etc.
+if [ -f "/usr/sbin/ip" ]; then
+    cp -L /usr/sbin/ip "${INITRAMFS_DIR}/sbin/ip"
+    echo "Copied iproute2 ip command"
+elif [ -f "/sbin/ip" ]; then
+    cp -L /sbin/ip "${INITRAMFS_DIR}/sbin/ip"
+    echo "Copied iproute2 ip command"
+else
+    echo "WARNING: iproute2 'ip' command not found, using busybox fallback"
+    ln -sf ../bin/busybox "${INITRAMFS_DIR}/sbin/ip"
+fi
+
+echo ">>> Copying kernel modules for networking..."
+# Copy VLAN (802.1Q) and bonding kernel modules if available
+KERNEL_VERSION=$(uname -r)
+MODULE_DIR="/lib/modules/${KERNEL_VERSION}/kernel/drivers/net"
+
+if [ -d "${MODULE_DIR}" ]; then
+    # VLAN support (8021q module)
+    if [ -f "${MODULE_DIR}/8021q.ko" ] || [ -f "${MODULE_DIR}/8021q.ko.xz" ]; then
+        mkdir -p "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/kernel/drivers/net"
+        cp -L "${MODULE_DIR}"/8021q.ko* "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/kernel/drivers/net/" 2>/dev/null || true
+        echo "Copied VLAN (8021q) kernel module"
+    fi
+    
+    # Bonding support
+    if [ -f "${MODULE_DIR}/bonding/bonding.ko" ] || [ -f "${MODULE_DIR}/bonding/bonding.ko.xz" ]; then
+        mkdir -p "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/kernel/drivers/net/bonding"
+        cp -L "${MODULE_DIR}/bonding"/bonding.ko* "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/kernel/drivers/net/bonding/" 2>/dev/null || true
+        echo "Copied bonding kernel module"
+    fi
+    
+    # Create modules.dep if modules were copied
+    if [ -d "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}" ]; then
+        echo "# Minimal modules.dep for initramfs" > "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/modules.dep"
+        echo "kernel/drivers/net/8021q.ko:" >> "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/modules.dep" 2>/dev/null || true
+        echo "kernel/drivers/net/bonding/bonding.ko:" >> "${INITRAMFS_DIR}/lib/modules/${KERNEL_VERSION}/modules.dep" 2>/dev/null || true
+    fi
+else
+    echo "WARNING: Kernel modules directory not found at ${MODULE_DIR}"
+    echo "VLAN and bonding support may not be available"
+fi
 
 # Create essential devices (if not using devtmpfs)
 # sudo mknod -m 600 "${INITRAMFS_DIR}/dev/console" c 5 1
