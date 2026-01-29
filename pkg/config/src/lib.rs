@@ -4,6 +4,7 @@ use std::path::Path;
 use thiserror::Error;
 
 pub mod bootstrap;
+pub mod network;
 
 #[derive(Error, Debug)]
 pub enum ConfigError {

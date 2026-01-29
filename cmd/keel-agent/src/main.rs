@@ -14,8 +14,10 @@
 use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
     BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
-    CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
-    GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
+    CancelScheduledUpdateResponse, ConfigureNetworkRequest, ConfigureNetworkResponse,
+    GetBootstrapStatusRequest, GetBootstrapStatusResponse, GetHealthRequest, GetHealthResponse,
+    GetNetworkConfigRequest, GetNetworkConfigResponse, GetNetworkStatusRequest,
+    GetNetworkStatusResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
     InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, RotateCertificateRequest,
@@ -38,6 +40,7 @@ mod health_check;
 mod hooks;
 mod k8s_csr;
 mod mtls;
+mod network;
 mod telemetry;
 mod update_scheduler;
 
@@ -699,6 +702,27 @@ impl NodeService for HelperNodeService {
                 Err(Status::internal(format!("Rotation failed: {}", e)))
             }
         }
+    }
+
+    async fn configure_network(
+        &self,
+        request: Request<ConfigureNetworkRequest>,
+    ) -> Result<Response<ConfigureNetworkResponse>, Status> {
+        network::configure_network(request).await
+    }
+
+    async fn get_network_config(
+        &self,
+        request: Request<GetNetworkConfigRequest>,
+    ) -> Result<Response<GetNetworkConfigResponse>, Status> {
+        network::get_network_config(request).await
+    }
+
+    async fn get_network_status(
+        &self,
+        request: Request<GetNetworkStatusRequest>,
+    ) -> Result<Response<GetNetworkStatusResponse>, Status> {
+        network::get_network_status(request).await
     }
 }
 

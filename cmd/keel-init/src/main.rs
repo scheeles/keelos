@@ -157,58 +157,239 @@ fn setup_filesystems() -> Result<(), InitError> {
     Ok(())
 }
 
-/// Configure basic networking (loopback and primary interface)
+/// Configure networking based on saved configuration or DHCP fallback
 fn setup_networking() {
     info!("Initializing networking");
 
-    // Check if busybox exists
-    if fs::metadata("/bin/busybox").is_err() {
-        warn!("/bin/busybox not found - networking configuration may fail");
-        return;
-    }
+    // Configure loopback first (always needed)
+    configure_loopback();
 
-    // Configure loopback
-    match Command::new("/bin/busybox")
-        .args(["ifconfig", "lo", "127.0.0.1", "up"])
-        .status()
-    {
-        Ok(status) if status.success() => debug!("Configured loopback interface"),
-        Ok(status) => warn!(exit_code = ?status.code(), "ifconfig lo failed"),
-        Err(e) => warn!(error = %e, "Failed to configure loopback"),
-    }
-
-    // Configure eth0 (QEMU default)
-    match Command::new("/bin/busybox")
-        .args([
-            "ifconfig",
-            "eth0",
-            "10.0.2.15",
-            "netmask",
-            "255.255.255.0",
-            "up",
-        ])
-        .status()
-    {
-        Ok(status) if status.success() => debug!(
-            interface = "eth0",
-            ip = "10.0.2.15",
-            "Configured network interface"
-        ),
-        Ok(status) => warn!(exit_code = ?status.code(), "ifconfig eth0 failed"),
-        Err(e) => warn!(error = %e, "Failed to configure eth0"),
-    }
-
-    // Add default route
-    match Command::new("/bin/busybox")
-        .args(["route", "add", "default", "gw", "10.0.2.2"])
-        .status()
-    {
-        Ok(status) if status.success() => debug!(gateway = "10.0.2.2", "Added default route"),
-        Ok(status) => warn!(exit_code = ?status.code(), "route add failed"),
-        Err(e) => warn!(error = %e, "Failed to add default route"),
+    // Try to load network configuration
+    match keel_config::network::NetworkConfig::load() {
+        Ok(config) => {
+            info!("Loading network configuration from file");
+            apply_network_config(&config);
+        }
+        Err(e) => {
+            debug!(error = %e, "No network configuration found, using DHCP fallback");
+            // Fallback to DHCP on eth0 (QEMU default primary interface)
+            configure_dhcp_fallback();
+        }
     }
 
     info!("Networking initialized");
+}
+
+/// Configure loopback interface
+fn configure_loopback() {
+    // Using ip command instead of busybox ifconfig for modern networking
+    match Command::new("/bin/ip")
+        .args(["link", "set", "lo", "up"])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            match Command::new("/bin/ip")
+                .args(["addr", "add", "127.0.0.1/8", "dev", "lo"])
+                .status()
+            {
+                Ok(status) if status.success() => debug!("Configured loopback interface"),
+                Ok(status) => warn!(exit_code = ?status.code(), "Failed to set loopback address"),
+                Err(e) => warn!(error = %e, "Failed to configure loopback address"),
+            }
+        }
+        Ok(status) => warn!(exit_code = ?status.code(), "Failed to bring up loopback"),
+        Err(e) => warn!(error = %e, "Failed to bring up loopback"),
+    }
+}
+
+/// Apply network configuration from config file
+fn apply_network_config(config: &keel_config::network::NetworkConfig) {
+    // Configure each interface
+    for iface in &config.interfaces {
+        configure_interface(iface);
+    }
+
+    // Configure DNS if present
+    if let Some(ref dns) = config.dns {
+        configure_dns(dns);
+    }
+
+    // Configure custom routes
+    for route in &config.routes {
+        configure_route(route);
+    }
+}
+
+/// Configure a single network interface
+fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
+    use keel_config::network::InterfaceType;
+
+    info!(interface = %iface.name, "Configuring network interface");
+
+    // Bring interface up
+    match Command::new("/bin/ip")
+        .args(["link", "set", &iface.name, "up"])
+        .status()
+    {
+        Ok(status) if status.success() => debug!(interface = %iface.name, "Interface up"),
+        Ok(status) => {
+            warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to bring up interface");
+            return;
+        }
+        Err(e) => {
+            warn!(interface = %iface.name, error = %e, "Failed to bring up interface");
+            return;
+        }
+    }
+
+    // Configure based on interface type
+    match &iface.config {
+        InterfaceType::Dhcp => {
+            // For DHCP, we just need to bring the interface up
+            // In a real system, you'd start a DHCP client here
+            debug!(interface = %iface.name, "DHCP configuration (client not implemented)");
+        }
+        InterfaceType::Static(cfg) => {
+            // Add IP address
+            match Command::new("/bin/ip")
+                .args(["addr", "add", &cfg.ipv4_address, "dev", &iface.name])
+                .status()
+            {
+                Ok(status) if status.success() => {
+                    info!(interface = %iface.name, ip = %cfg.ipv4_address, "Static IP configured");
+                }
+                Ok(status) => {
+                    warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to set IP address");
+                }
+                Err(e) => {
+                    warn!(interface = %iface.name, error = %e, "Failed to set IP address");
+                }
+            }
+
+            // Set gateway if present
+            if let Some(ref gateway) = cfg.gateway {
+                match Command::new("/bin/ip")
+                    .args([
+                        "route",
+                        "add",
+                        "default",
+                        "via",
+                        gateway,
+                        "dev",
+                        &iface.name,
+                    ])
+                    .status()
+                {
+                    Ok(status) if status.success() => {
+                        debug!(interface = %iface.name, gateway = %gateway, "Default route configured");
+                    }
+                    Ok(status) => {
+                        warn!(exit_code = ?status.code(), "Failed to set default route");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to set default route");
+                    }
+                }
+            }
+
+            // Set MTU if non-default
+            if cfg.mtu != 1500 {
+                match Command::new("/bin/ip")
+                    .args(["link", "set", &iface.name, "mtu", &cfg.mtu.to_string()])
+                    .status()
+                {
+                    Ok(status) if status.success() => {
+                        debug!(interface = %iface.name, mtu = cfg.mtu, "MTU configured");
+                    }
+                    Ok(status) => {
+                        warn!(exit_code = ?status.code(), "Failed to set MTU");
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to set MTU");
+                    }
+                }
+            }
+        }
+        InterfaceType::Vlan(_) => {
+            warn!(interface = %iface.name, "VLAN configuration not yet implemented");
+        }
+        InterfaceType::Bond(_) => {
+            warn!(interface = %iface.name, "Bond configuration not yet implemented");
+        }
+    }
+}
+
+/// Configure DNS resolvers
+fn configure_dns(dns: &keel_config::network::DnsConfig) {
+    let mut resolv_conf = String::from("# Generated by keel-init\n");
+
+    for ns in &dns.nameservers {
+        resolv_conf.push_str(&format!("nameserver {}\n", ns));
+    }
+
+    if !dns.search_domains.is_empty() {
+        resolv_conf.push_str(&format!("search {}\n", dns.search_domains.join(" ")));
+    }
+
+    match fs::write("/etc/resolv.conf", resolv_conf) {
+        Ok(_) => info!("DNS configuration written to /etc/resolv.conf"),
+        Err(e) => warn!(error = %e, "Failed to write /etc/resolv.conf"),
+    }
+}
+
+/// Configure a custom route
+fn configure_route(route: &keel_config::network::RouteConfig) {
+    let mut args = vec!["route", "add", &route.destination, "via", &route.gateway];
+
+    let metric_str;
+    if let Some(metric) = route.metric {
+        metric_str = metric.to_string();
+        args.extend_from_slice(&["metric", &metric_str]);
+    }
+
+    match Command::new("/bin/ip").args(&args).status() {
+        Ok(status) if status.success() => {
+            info!(destination = %route.destination, gateway = %route.gateway, "Route configured");
+        }
+        Ok(status) => {
+            warn!(exit_code = ?status.code(), "Failed to configure route");
+        }
+        Err(e) => {
+            warn!(error = %e, "Failed to configure route");
+        }
+    }
+}
+
+/// Fallback DHCP configuration for QEMU testing
+fn configure_dhcp_fallback() {
+    info!("Using DHCP fallback for eth0");
+
+    // For QEMU testing, use static IP that matches QEMU's default network
+    // In production, this would start a proper DHCP client
+    match Command::new("/bin/ip")
+        .args(["link", "set", "eth0", "up"])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            // Use QEMU's default network: 10.0.2.0/24
+            match Command::new("/bin/ip")
+                .args(["addr", "add", "10.0.2.15/24", "dev", "eth0"])
+                .status()
+            {
+                Ok(status) if status.success() => {
+                    debug!("Set eth0 IP to 10.0.2.15/24");
+                    // Add default route
+                    let _ = Command::new("/bin/ip")
+                        .args(["route", "add", "default", "via", "10.0.2.2", "dev", "eth0"])
+                        .status();
+                }
+                Ok(status) => warn!(exit_code = ?status.code(), "Failed to set eth0 address"),
+                Err(e) => warn!(error = %e, "Failed to set eth0 address"),
+            }
+        }
+        Ok(status) => warn!(exit_code = ?status.code(), "Failed to bring up eth0"),
+        Err(e) => warn!(error = %e, "Failed to bring up eth0"),
+    }
 }
 
 /// Check for test mode flags in kernel cmdline
