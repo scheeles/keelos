@@ -33,6 +33,7 @@ mod disk;
 mod health;
 mod health_check;
 mod hooks;
+mod k8s_csr;
 mod mtls;
 mod telemetry;
 mod update_scheduler;
