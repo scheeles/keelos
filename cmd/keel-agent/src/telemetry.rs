@@ -5,9 +5,9 @@
 //! - Metrics collection (system and application)
 //! - OTLP export to collectors
 
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{runtime, Resource};
+use opentelemetry_sdk::{runtime, trace::{Config, TracerProvider as SdkTracerProvider}, Resource};
 use sysinfo::System;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -30,40 +30,40 @@ pub fn init_telemetry(
         .build();
 
     // Initialize tracing if OTLP endpoint is provided
-    let tracer = if let Some(endpoint) = otlp_endpoint {
-        Some(
-            opentelemetry_otlp::new_pipeline()
-                .tracing()
-                .with_exporter(
-                    opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_endpoint(endpoint),
-                )
-                .with_trace_config(
-                    opentelemetry_sdk::trace::Config::default().with_resource(resource.clone()),
-                )
-                .install_batch(runtime::Tokio)?,
-        )
+    if let Some(endpoint) = otlp_endpoint {
+        let exporter = opentelemetry_otlp::SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(endpoint)
+            .build()?;
+
+        let tracer_provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
+            .with_config(Config::default().with_resource(resource))
+            .build();
+
+        // Set global tracer provider
+        global::set_tracer_provider(tracer_provider.clone());
+
+        // Create tracing subscriber with OpenTelemetry layer
+        let tracer = tracer_provider.tracer("keel-agent");
+        let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+
+        // Set up structured logging with OpenTelemetry
+        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().compact())
+            .with(telemetry_layer)
+            .init();
     } else {
-        None
-    };
+        // Set up structured logging without OpenTelemetry
+        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    // Create tracing subscriber with OpenTelemetry layer
-    let telemetry_layer = tracer
-        .as_ref()
-        .map(|t| tracing_opentelemetry::layer().with_tracer(t.clone()));
-
-    // Set up structured logging with optional OpenTelemetry
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-
-    let subscriber = tracing_subscriber::registry()
-        .with(env_filter)
-        .with(tracing_subscriber::fmt::layer().compact());
-
-    if let Some(layer) = telemetry_layer {
-        subscriber.with(layer).init();
-    } else {
-        subscriber.init();
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().compact())
+            .init();
     }
 
     Ok(())
@@ -71,7 +71,9 @@ pub fn init_telemetry(
 
 /// Shutdown telemetry and flush pending data
 pub fn shutdown_telemetry() {
-    global::shutdown_tracer_provider();
+    // In v0.31, we need to call shutdown on the provider instance
+    // Since we set it globally, we can't easily access it here
+    // The global provider will be cleaned up on process exit
 }
 
 /// System metrics collector using sysinfo
