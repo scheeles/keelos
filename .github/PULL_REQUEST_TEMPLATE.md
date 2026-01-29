@@ -4,7 +4,6 @@
 **Which issue(s) this PR fixes**:
 <!--optional, in `fixes #<issue number>` format, will close the issue(s) when PR gets merged-->
 
-
 ## Type of Change
 <!-- Mark the relevant option with an "x" -->
 
