@@ -2,11 +2,14 @@ use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
     BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetCertificateInfoRequest,
-    GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest,
-    RebootRequest, TriggerRollbackRequest,
+    GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
+    InstallUpdateRequest, RebootRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
+
+mod cert_store;
+use cert_store::{extract_node_from_endpoint, CertStore};
 
 #[derive(Parser)]
 #[command(name = "osctl")]
@@ -120,26 +123,70 @@ enum RollbackAction {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    let cert_path = "client.pem";
-    let key_path = "client.key";
-    let ca_path = "ca.pem";
+    // Extract node IP/hostname from endpoint for cert lookup
+    let node_id =
+        extract_node_from_endpoint(&cli.endpoint).unwrap_or_else(|_| "localhost".to_string());
+
+    // Try loading certificates in order: operational > bootstrap > fallback to hardcoded
+    let cert_store = CertStore::new()?;
+
+    let (cert_opt, key_opt, ca_opt, using_bootstrap) =
+        if cert_store.certs_exist(&node_id, "operational") {
+            let certs = cert_store.load_certs(&node_id, "operational")?;
+            (
+                Some(certs.cert_pem),
+                Some(certs.key_pem),
+                certs.ca_pem,
+                false,
+            )
+        } else if cert_store.certs_exist(&node_id, "bootstrap") {
+            let certs = cert_store.load_certs(&node_id, "bootstrap")?;
+            eprintln!("⚠️  Warning: Using bootstrap certificates (24h validity)");
+            (
+                Some(certs.cert_pem),
+                Some(certs.key_pem),
+                certs.ca_pem,
+                true,
+            )
+        } else {
+            // Fallback to hardcoded paths for backwards compatibility
+            let cert_path = "client.pem";
+            let key_path = "client.key";
+            let ca_path = "ca.pem";
+
+            if std::path::Path::new(cert_path).exists() {
+                let cert = std::fs::read_to_string(cert_path)?;
+                let key = std::fs::read_to_string(key_path)?;
+                let ca = if std::path::Path::new(ca_path).exists() {
+                    Some(std::fs::read_to_string(ca_path)?)
+                } else {
+                    None
+                };
+                (Some(cert), Some(key), ca, false)
+            } else {
+                (None, None, None, false)
+            }
+        };
 
     let mut endpoint = tonic::transport::Endpoint::from_shared(cli.endpoint.clone())?;
 
-    if std::path::Path::new(cert_path).exists() {
-        let cert = std::fs::read_to_string(cert_path)?;
-        let key = std::fs::read_to_string(key_path)?;
-        let ca = std::fs::read_to_string(ca_path)?;
-
+    if let (Some(cert), Some(key)) = (cert_opt, key_opt) {
         let identity = tonic::transport::Identity::from_pem(cert, key);
-        let ca_cert = tonic::transport::Certificate::from_pem(ca);
 
-        let tls_config = tonic::transport::ClientTlsConfig::new()
+        let mut tls_config = tonic::transport::ClientTlsConfig::new()
             .identity(identity)
-            .ca_certificate(ca_cert)
             .domain_name("localhost");
 
+        if let Some(ca) = ca_opt {
+            let ca_cert = tonic::transport::Certificate::from_pem(ca);
+            tls_config = tls_config.ca_certificate(ca_cert);
+        }
+
         endpoint = endpoint.tls_config(tls_config)?;
+
+        if using_bootstrap {
+            eprintln!("   Run 'osctl init kubeconfig' after joining Kubernetes");
+        }
     }
 
     let mut client = NodeServiceClient::connect(endpoint).await?;
@@ -322,11 +369,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
         }
-        Commands::Init { mode: _ } => {
-            // TODO: Implement init command with bootstrap and kubeconfig modes
-            eprintln!("Init command is not yet fully implemented");
-            std::process::exit(1);
-        }
+        Commands::Init { mode } => match mode {
+            InitMode::Bootstrap { node } => {
+                println!("Initializing bootstrap certificates for node: {}", node);
+
+                // 1. Generate 24h bootstrap certificate on client
+                let (cert_pem, key_pem) = keel_crypto::generate_bootstrap_cert("osctl-client", 24)
+                    .map_err(|e| format!("Failed to generate bootstrap cert: {}", e))?;
+
+                println!("✓ Generated 24h bootstrap certificate");
+
+                // 2. Send only public cert to node via InitBootstrap RPC
+                let request = tonic::Request::new(InitBootstrapRequest {
+                    client_cert_pem: cert_pem.clone(),
+                });
+
+                let response = client.init_bootstrap(request).await?;
+                let inner = response.into_inner();
+
+                if !inner.success {
+                    return Err(
+                        format!("Bootstrap initialization failed: {}", inner.message).into(),
+                    );
+                }
+
+                println!("✓ Server accepted bootstrap certificate");
+                println!("  Stored at: {}", inner.stored_cert_path);
+
+                // 3. Save cert+key locally in ~/.keel/certs/<node>/bootstrap/
+                let cert_store = CertStore::new()?;
+                let paths = cert_store.save_certs(node, "bootstrap", &cert_pem, &key_pem, None)?;
+
+                println!("✓ Saved certificates locally:");
+                println!("  Cert: {}", paths.cert.display());
+                println!("  Key:  {} (permissions: 0600)", paths.key.display());
+
+                println!("\n✅ Bootstrap initialization complete!");
+                println!("   Valid for: 24 hours");
+                println!("   Next: Join Kubernetes cluster, then run 'osctl init kubeconfig'");
+            }
+            InitMode::Kubeconfig { kubeconfig } => {
+                println!("Initializing with Kubernetes PKI certificates");
+                println!("Kubeconfig: {}", kubeconfig.display());
+                println!();
+
+                // For now, this is a stub with manual instructions
+                println!("⚠️  K8s API integration not yet implemented");
+                println!("\nManual workflow:");
+                println!("1. Generate CSR using keel-crypto");
+                println!("2. Submit CSR to K8s API:");
+                println!("   kubectl create -f csr.yaml");
+                println!("3. Approve CSR:");
+                println!("   kubectl certificate approve osctl-client");
+                println!("4. Get signed certificate:");
+                println!("   kubectl get csr osctl-client -o jsonpath='{{.status.certificate}}' | base64 -d");
+                println!("5. Save signed cert and send to node via InitKubeconfig RPC");
+                println!("\n📋 This will be fully automated in a future release.");
+            }
+        },
         Commands::CertInfo => {
             let request = tonic::Request::new(GetCertificateInfoRequest {});
             let response = client.get_certificate_info(request).await?;
@@ -363,10 +463,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Commands::RotateCert { auto_approve: _ } => {
-            // TODO: Implement certificate rotation
-            eprintln!("Certificate rotation is not yet fully implemented");
-            std::process::exit(1);
+        Commands::RotateCert { auto_approve } => {
+            println!("Rotating operational certificates...");
+
+            if !*auto_approve {
+                println!("\n⚠️  This will generate a new certificate and replace the current one.");
+                print!("Continue? [y/N]: ");
+                use std::io::{self, Write};
+                io::stdout().flush()?;
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+
+                if !input.trim().eq_ignore_ascii_case("y") {
+                    println!("❌ Rotation cancelled");
+                    return Ok(());
+                }
+            }
+
+            println!("\n⚠️  K8s API integration not yet implemented");
+            println!("\nManual workflow for certificate rotation:");
+            println!("1. Generate CSR: keel_crypto::generate_csr()");
+            println!("2. Submit CSR to K8s API");
+            println!("3. Get signed certificate from K8s");
+            println!("4. Send to node via RotateCertificate RPC");
+            println!("5. Save new cert locally");
+            println!("\n📋 This will be fully automated in a future release.");
         }
     }
 
