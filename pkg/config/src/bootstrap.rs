@@ -156,7 +156,6 @@ pub fn prepare_k8s_directories<P: AsRef<Path>>(base_path: P) -> Result<(), Boots
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::{NamedTempFile, TempDir};
 
     #[test]
@@ -182,7 +181,7 @@ mod tests {
             "/var/lib/keel/kubernetes/ca.crt".to_string(),
         );
 
-        let mut file = NamedTempFile::new().unwrap();
+        let file = NamedTempFile::new().unwrap();
         let path = file.path().to_path_buf();
 
         config.save(&path).unwrap();

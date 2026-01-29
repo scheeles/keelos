@@ -267,7 +267,7 @@ mod tests {
         let info = result.unwrap();
         assert!(info.exists);
         assert!(!info.is_expired);
-        assert!(info.days_until_expiry > 0);
+        assert!(info.days_until_expiry >= 0); // Can be 0 for certs expiring within 24h
     }
 
     #[test]
