@@ -3,10 +3,13 @@ use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
     BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetHealthRequest,
     GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest, RebootRequest,
-    TriggerRollbackRequest,
+    TriggerRollbackRequest, InitBootstrapRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
+
+mod cert_store;
+use cert_store::{CertStore, extract_node_from_endpoint};
 
 #[derive(Parser)]
 #[command(name = "osctl")]
@@ -53,6 +56,11 @@ enum Commands {
         #[command(subcommand)]
         action: RollbackAction,
     },
+    /// Initialize certificates
+    Init {
+        #[command(subcommand)]
+        mode: InitMode,
+    },
     /// Join a Kubernetes cluster
     Bootstrap {
         /// Kubernetes API server endpoint (e.g., "https://k8s.example.com:6443")
@@ -85,6 +93,18 @@ enum RollbackAction {
     },
     /// View rollback history
     History,
+}
+
+#[derive(Subcommand)]
+enum InitMode {
+    /// Initialize with self-signed bootstrap certificate (24h validity)
+    Bootstrap {
+        /// Node endpoint (e.g., "192.168.1.10" or "localhost")
+        #[arg(long)]
+        node: String,
+    },
+    /// Initialize with Kubernetes-signed operational certificate
+    Kubeconfig,
 }
 
 #[tokio::main]
@@ -277,6 +297,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::process::exit(1);
             }
         }
+        Commands::Init { mode } => match mode {
+            InitMode::Bootstrap { node } => {
+                println!("Generating 24h bootstrap certificate...");
+                
+                let (cert_pem, key_pem) = keel_crypto::generate_bootstrap_certificate(24)?;
+                println!("✓ Generated bootstrap certificate");
+                
+                let endpoint = format!("http://{}:50051", node);
+                let mut client = NodeServiceClient::connect(endpoint.clone()).await?;
+                
+                let request = tonic::Request::new(InitBootstrapRequest {
+                    client_cert_pem: cert_pem.clone(),
+                });
+                
+                let response = client.init_bootstrap(request).await?;
+                let inner = response.into_inner();
+                
+                if !inner.success {
+                    return Err(format!("Failed: {}", inner.message).into());
+                }
+                
+                println!("✓ Server accepted bootstrap certificate");
+                
+                let node_id = extract_node_from_endpoint(&endpoint)?;
+                let cert_store = CertStore::new()?;
+                let paths = cert_store.save_certs(&node_id, "bootstrap", &cert_pem, &key_pem, None)?;
+                
+                println!("✓ Saved certificates locally:");
+                println!("  Cert: {}", paths.cert.display());
+                println!("  Key:  {} (PRIVATE - never sent to server)", paths.key.display());
+                println!("\n✅ Bootstrap initialization complete!");
+            }
+            InitMode::Kubeconfig => {
+                println!("K8s operational cert initialization - TODO");
+            }
+        },
         Commands::BootstrapStatus => {
             let request = tonic::Request::new(GetBootstrapStatusRequest {});
             let response = client.get_bootstrap_status(request).await?;

@@ -17,9 +17,9 @@ use keel_api::node::{
     CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
     GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
-    HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
-    RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
-    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
+    HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
+    InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, ScheduleUpdateRequest,
+    ScheduleUpdateResponse, TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
     UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
@@ -556,6 +556,58 @@ impl NodeService for HelperNodeService {
             node_name: config.node_name,
             kubeconfig_path: config.kubeconfig_path,
             bootstrapped_at: config.bootstrapped_at,
+        }))
+    }
+
+    async fn init_bootstrap(
+        &self,
+        request: Request<InitBootstrapRequest>,
+    ) -> Result<Response<InitBootstrapResponse>, Status> {
+        let req = request.into_inner();
+        
+        info!("Received bootstrap certificate initialization request");
+        
+        // Validate the client certificate PEM
+        if let Err(e) = keel_crypto::validate_bootstrap_cert(&req.client_cert_pem) {
+            warn!("Invalid bootstrap certificate: {}", e);
+            return Ok(Response::new(InitBootstrapResponse {
+                success: false,
+                message: format!("Invalid certificate: {}", e),
+            }));
+        }
+        
+        // Store the client's public certificate in trusted clients directory
+        let cert_dir = std::path::Path::new("/var/lib/keel/crypto/trusted-clients/bootstrap");
+        if let Err(e) = std::fs::create_dir_all(cert_dir) {
+            error!("Failed to create cert directory: {}", e);
+            return Ok(Response::new(InitBootstrapResponse {
+                success: false,
+                message: format!("Failed to create cert directory: {}", e),
+            }));
+        }
+        
+        // Generate a unique filename based on cert hash
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        req.client_cert_pem.hash(&mut hasher);
+        let cert_hash = hasher.finish();
+        
+        let cert_path = cert_dir.join(format!("client-{:x}.pem", cert_hash));
+        
+        if let Err(e) = std::fs::write(&cert_path, &req.client_cert_pem) {
+            error!("Failed to write certificate: {}", e);
+            return Ok(Response::new(InitBootstrapResponse {
+                success: false,
+                message: format!("Failed to write certificate: {}", e),
+            }));
+        }
+        
+        info!("Stored bootstrap certificate: {}", cert_path.display());
+        
+        Ok(Response::new(InitBootstrapResponse {
+            success: true,
+            message: "Bootstrap certificate accepted and stored".to_string(),
         }))
     }
 }
