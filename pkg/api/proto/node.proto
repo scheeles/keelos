@@ -33,6 +33,9 @@ service NodeService {
   // Bootstrap certificate initialization (unauthenticated)
   rpc InitBootstrap (InitBootstrapRequest) returns (InitBootstrapResponse);
   
+  // Rotate operational certificate (triggers new K8s CSR)
+  rpc RotateCertificate (RotateCertificateRequest) returns (RotateCertificateResponse);
+  
   // Bootstrap Kubernetes cluster joining
   rpc BootstrapKubernetes (BootstrapKubernetesRequest) returns (BootstrapKubernetesResponse);
   
@@ -245,4 +248,19 @@ message InitBootstrapRequest {
 message InitBootstrapResponse {
   bool success = 1;
   string message = 2;
+}
+
+// Certificate rotation messages
+message RotateCertificateRequest {
+  // Force rotation even if current cert is valid
+  bool force = 1;
+}
+
+message RotateCertificateResponse {
+  bool success = 1;
+  string message = 2;
+  // Path to new certificate
+  string cert_path = 3;
+  // Certificate expiry time (RFC3339)
+  string expires_at = 4;
 }
