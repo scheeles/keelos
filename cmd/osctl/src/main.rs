@@ -2,14 +2,14 @@ use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
     BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetHealthRequest,
-    GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest, RebootRequest,
-    TriggerRollbackRequest, InitBootstrapRequest,
+    GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest, InstallUpdateRequest,
+    RebootRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
 
 mod cert_store;
-use cert_store::{CertStore, extract_node_from_endpoint};
+use cert_store::{extract_node_from_endpoint, CertStore};
 
 #[derive(Parser)]
 #[command(name = "osctl")]
@@ -300,33 +300,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Init { mode } => match mode {
             InitMode::Bootstrap { node } => {
                 println!("Generating 24h bootstrap certificate...");
-                
+
                 let (cert_pem, key_pem) = keel_crypto::generate_bootstrap_certificate(24)?;
                 println!("✓ Generated bootstrap certificate");
-                
+
                 let endpoint = format!("http://{}:50051", node);
                 let mut client = NodeServiceClient::connect(endpoint.clone()).await?;
-                
+
                 let request = tonic::Request::new(InitBootstrapRequest {
                     client_cert_pem: cert_pem.clone(),
                 });
-                
+
                 let response = client.init_bootstrap(request).await?;
                 let inner = response.into_inner();
-                
+
                 if !inner.success {
                     return Err(format!("Failed: {}", inner.message).into());
                 }
-                
+
                 println!("✓ Server accepted bootstrap certificate");
-                
+
                 let node_id = extract_node_from_endpoint(&endpoint)?;
                 let cert_store = CertStore::new()?;
-                let paths = cert_store.save_certs(&node_id, "bootstrap", &cert_pem, &key_pem, None)?;
-                
+                let paths =
+                    cert_store.save_certs(&node_id, "bootstrap", &cert_pem, &key_pem, None)?;
+
                 println!("✓ Saved certificates locally:");
                 println!("  Cert: {}", paths.cert.display());
-                println!("  Key:  {} (PRIVATE - never sent to server)", paths.key.display());
+                println!(
+                    "  Key:  {} (PRIVATE - never sent to server)",
+                    paths.key.display()
+                );
                 println!("\n✅ Bootstrap initialization complete!");
             }
             InitMode::Kubeconfig => {

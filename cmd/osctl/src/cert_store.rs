@@ -3,12 +3,13 @@
 //! Manages local certificate storage in ~/.keel/certs/<node>/<tier>/
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct CertificatePaths {
     pub cert: PathBuf,
     pub key: PathBuf,
+    #[allow(dead_code)] // Will be used for auto-loading
     pub ca: Option<PathBuf>,
 }
 
@@ -19,11 +20,10 @@ pub struct CertStore {
 impl CertStore {
     /// Create a new cert store using ~/.keel/certs
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let home = dirs::home_dir()
-            .ok_or("Could not determine home directory")?;
+        let home = dirs::home_dir().ok_or("Could not determine home directory")?;
         let base_dir = home.join(".keel").join("certs");
         fs::create_dir_all(&base_dir)?;
-        
+
         Ok(Self { base_dir })
     }
 
@@ -74,13 +74,14 @@ impl CertStore {
     }
 
     /// Load certificates for a specific node and tier
+    #[allow(dead_code)] // Will be used for auto-loading certs
     pub fn load_certs(
         &self,
         node_id: &str,
         tier: &str,
     ) -> Result<CertificatePaths, Box<dyn std::error::Error>> {
         let cert_dir = self.base_dir.join(node_id).join(tier);
-        
+
         if !cert_dir.exists() {
             return Err(format!("No certificates found for node {} tier {}", node_id, tier).into());
         }
@@ -96,12 +97,20 @@ impl CertStore {
         Ok(CertificatePaths {
             cert: cert_path,
             key: key_path,
-            ca: if ca_path.exists() { Some(ca_path) } else { None },
+            ca: if ca_path.exists() {
+                Some(ca_path)
+            } else {
+                None
+            },
         })
     }
 
     /// Find best available certificate for a node (operational first, then bootstrap)
-    pub fn find_best_cert(&self, node_id: &str) -> Result<(String, CertificatePaths), Box<dyn std::error::Error>> {
+    #[allow(dead_code)] // Will be used for auto-loading certs
+    pub fn find_best_cert(
+        &self,
+        node_id: &str,
+    ) -> Result<(String, CertificatePaths), Box<dyn std::error::Error>> {
         // Try operational first
         if let Ok(paths) = self.load_certs(node_id, "operational") {
             return Ok(("operational".to_string(), paths));
@@ -118,10 +127,12 @@ impl CertStore {
 
 /// Extract node ID from endpoint (e.g., "http://192.168.1.10:50051" -> "192_168_1_10")
 pub fn extract_node_from_endpoint(endpoint: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let url = endpoint.trim_start_matches("http://").trim_start_matches("https://");
+    let url = endpoint
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
     let host = url.split(':').next().ok_or("Invalid endpoint format")?;
-    
+
     // Replace dots and colons with underscores for filesystem safety
-    let node_id = host.replace('.', "_").replace(':', "_");
+    let node_id = host.replace(['.', ':'], "_");
     Ok(node_id)
 }

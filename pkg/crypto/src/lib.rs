@@ -58,7 +58,9 @@ pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
 /// Generate a bootstrap certificate with specific validity period
 /// Returns (cert_pem, key_pem)
 /// Note: Currently uses fixed validity from rcgen, validity_hours parameter is for future use
-pub fn generate_bootstrap_certificate(_validity_hours: u32) -> Result<(String, String), CryptoError> {
+pub fn generate_bootstrap_certificate(
+    _validity_hours: u32,
+) -> Result<(String, String), CryptoError> {
     // For now, use the simple self-signed generator
     // TODO: Implement custom validity period when rcgen API supports it better
     let cert = rcgen::generate_simple_self_signed(vec!["keel-bootstrap".to_string()])

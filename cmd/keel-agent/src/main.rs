@@ -33,11 +33,14 @@ mod disk;
 mod health;
 mod health_check;
 mod hooks;
+mod mtls;
 mod telemetry;
 mod update_scheduler;
 
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
+#[allow(unused_imports)] // TODO: Use TlsManager once mTLS integration is complete
+use mtls::TlsManager;
 use update_scheduler::{ScheduleStatus, UpdateScheduler};
 
 #[derive(Clone)]
@@ -564,9 +567,9 @@ impl NodeService for HelperNodeService {
         request: Request<InitBootstrapRequest>,
     ) -> Result<Response<InitBootstrapResponse>, Status> {
         let req = request.into_inner();
-        
+
         info!("Received bootstrap certificate initialization request");
-        
+
         // Validate the client certificate PEM
         if let Err(e) = keel_crypto::validate_bootstrap_cert(&req.client_cert_pem) {
             warn!("Invalid bootstrap certificate: {}", e);
@@ -575,7 +578,7 @@ impl NodeService for HelperNodeService {
                 message: format!("Invalid certificate: {}", e),
             }));
         }
-        
+
         // Store the client's public certificate in trusted clients directory
         let cert_dir = std::path::Path::new("/var/lib/keel/crypto/trusted-clients/bootstrap");
         if let Err(e) = std::fs::create_dir_all(cert_dir) {
@@ -585,16 +588,16 @@ impl NodeService for HelperNodeService {
                 message: format!("Failed to create cert directory: {}", e),
             }));
         }
-        
+
         // Generate a unique filename based on cert hash
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         req.client_cert_pem.hash(&mut hasher);
         let cert_hash = hasher.finish();
-        
+
         let cert_path = cert_dir.join(format!("client-{:x}.pem", cert_hash));
-        
+
         if let Err(e) = std::fs::write(&cert_path, &req.client_cert_pem) {
             error!("Failed to write certificate: {}", e);
             return Ok(Response::new(InitBootstrapResponse {
@@ -602,9 +605,9 @@ impl NodeService for HelperNodeService {
                 message: format!("Failed to write certificate: {}", e),
             }));
         }
-        
+
         info!("Stored bootstrap certificate: {}", cert_path.display());
-        
+
         Ok(Response::new(InitBootstrapResponse {
             success: true,
             message: "Bootstrap certificate accepted and stored".to_string(),
