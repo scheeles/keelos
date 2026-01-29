@@ -7,7 +7,7 @@
 
 use opentelemetry::{global, trace::TracerProvider, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{runtime, trace::{Config, TracerProvider as SdkTracerProvider}, Resource};
+use opentelemetry_sdk::{trace::SdkTracerProvider, Resource};
 use sysinfo::System;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -31,14 +31,14 @@ pub fn init_telemetry(
 
     // Initialize tracing if OTLP endpoint is provided
     if let Some(endpoint) = otlp_endpoint {
-        let exporter = opentelemetry_otlp::SpanExporter::builder()
+        let exporter = opentelemetry_otlp::SpanExporterBuilder::default()
             .with_tonic()
             .with_endpoint(endpoint)
             .build()?;
 
         let tracer_provider = SdkTracerProvider::builder()
             .with_batch_exporter(exporter)
-            .with_config(Config::default().with_resource(resource))
+            .with_resource(resource)
             .build();
 
         // Set global tracer provider
@@ -49,7 +49,8 @@ pub fn init_telemetry(
         let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
         // Set up structured logging with OpenTelemetry
-        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         tracing_subscriber::registry()
             .with(env_filter)
@@ -58,7 +59,8 @@ pub fn init_telemetry(
             .init();
     } else {
         // Set up structured logging without OpenTelemetry
-        let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+        let env_filter =
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
         tracing_subscriber::registry()
             .with(env_filter)
