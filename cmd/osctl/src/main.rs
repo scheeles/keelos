@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
-    BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetHealthRequest,
-    GetRollbackHistoryRequest, GetStatusRequest, InstallUpdateRequest, RebootRequest,
-    TriggerRollbackRequest,
+    BootstrapKubernetesRequest, GetBootstrapStatusRequest, GetCertificateInfoRequest,
+    GetHealthRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
+    InitKubeconfigRequest, InstallUpdateRequest, RebootRequest,
+    RotateCertificateRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -73,6 +74,35 @@ enum Commands {
     },
     /// Get Kubernetes bootstrap status
     BootstrapStatus,
+    /// Initialize certificates
+    Init {
+        #[command(subcommand)]
+        mode: InitMode,
+    },
+    /// Display certificate information
+    CertInfo,
+    /// Rotate certificates
+    RotateCert {
+        /// Auto-approve without confirmation
+        #[arg(long)]
+        auto_approve: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum InitMode {
+    /// Initialize with bootstrap certificates
+    Bootstrap {
+        /// Node IP address
+        #[arg(long)]
+        node: String,
+    },
+    /// Initialize with Kubernetes PKI certificates
+    Kubeconfig {
+        /// Path to kubeconfig file
+        #[arg(long)]
+        kubeconfig: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -292,6 +322,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\n⚠️  Node is not bootstrapped to any Kubernetes cluster");
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
+        }
+        Commands::Init { mode } => {
+            // TODO: Implement init command with bootstrap and kubeconfig modes
+            eprintln!("Init command is not yet fully implemented");
+            std::process::exit(1);
+        }
+        Commands::CertInfo => {
+            let request = tonic::Request::new(GetCertificateInfoRequest {});
+            let response = client.get_certificate_info(request).await?;
+            let info = response.into_inner();
+
+            println!("\n🔐 Certificate Information\n");
+
+            if let Some(bootstrap) = info.bootstrap {
+                if bootstrap.exists {
+                    println!("Bootstrap Certificates: ✅ Active");
+                    println!("  Subject: {}", bootstrap.subject);
+                    println!("  Days until expiry: {}", bootstrap.days_until_expiry);
+                } else {
+                    println!("Bootstrap Certificates: ❌ Not present");
+                }
+            }
+
+            println!();
+
+            if let Some(operational) = info.operational {
+                if operational.exists {
+                    println!("Operational Certificates: ✅ Active");
+                    println!("  Subject: {}", operational.subject);
+                    println!("  Days until expiry: {}", operational.days_until_expiry);
+                } else {
+                    println!("Operational Certificates: ❌ Not present");
+                }
+            }
+
+            if !info.trusted_clients.is_empty() {
+                println!("\nTrusted Clients: {}", info.trusted_clients.len());
+                for client_info in info.trusted_clients {
+                    println!("  - {}", client_info);
+                }
+            }
+        }
+        Commands::RotateCert { auto_approve } => {
+            // TODO: Implement certificate rotation
+            eprintln!("Certificate rotation is not yet fully implemented");
+            std::process::exit(1);
         }
     }
 

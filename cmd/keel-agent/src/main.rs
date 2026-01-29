@@ -15,10 +15,14 @@ use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
     BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
     CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
+    GetCertificateInfoRequest, GetCertificateInfoResponse,
     GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
-    HealthCheckResult as ProtoHealthCheckResult, InstallUpdateRequest, RebootRequest,
-    RebootResponse, RollbackEvent, ScheduleUpdateRequest, ScheduleUpdateResponse,
+    HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
+    InitKubeconfigRequest, InitKubeconfigResponse,
+    InstallUpdateRequest, RebootRequest,
+    RebootResponse, RollbackEvent, RotateCertificateRequest, RotateCertificateResponse,
+    ScheduleUpdateRequest, ScheduleUpdateResponse,
     TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
     UpdateSchedule as ProtoUpdateSchedule,
 };
@@ -556,9 +560,234 @@ impl NodeService for HelperNodeService {
             node_name: config.node_name,
             kubeconfig_path: config.kubeconfig_path,
             bootstrapped_at: config.bootstrapped_at,
+        }))\n    }
+
+    async fn init_bootstrap(
+        &self,
+        request: Request<InitBootstrapRequest>,
+    ) -> Result<Response<InitBootstrapResponse>, Status> {
+        let req = request.into_inner();
+
+        info!("InitBootstrap request received (unauthenticated)");
+
+        if req.client_cert_pem.is_empty() {
+            return Err(Status::invalid_argument("client_cert_pem is required"));
+        }
+
+        // Create trusted clients directory
+        let cert_dir = "/var/lib/keel/crypto/trusted-clients/bootstrap";
+        std::fs::create_dir_all(cert_dir)
+            .map_err(|e| Status::internal(format!("Failed to create cert directory: {}", e)))?;
+
+        // Generate a unique ID for this client based on cert hash
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        req.client_cert_pem.hash(&mut hasher);
+        let client_id = format!("{:x}", hasher.finish());
+
+        let cert_path = format!("{}/{}.pem", cert_dir, client_id);
+
+        // Write client certificate
+        std::fs::write(&cert_path, &req.client_cert_pem)
+            .map_err(|e| Status::internal(format!("Failed to write client certificate: {}", e)))?;
+
+        info!(
+            client_id = %client_id,
+            path = %cert_path,
+            "Bootstrap client certificate stored"
+        );
+
+        Ok(Response::new(InitBootstrapResponse {
+            success: true,
+            message: format!("Bootstrap certificate accepted for client {}", client_id),
+            stored_cert_path: cert_path,
+        }))
+    }
+
+    async fn init_kubeconfig(
+        &self,
+        request: Request<InitKubeconfigRequest>,
+    ) -> Result<Response<InitKubeconfigResponse>, Status> {
+        let req = request.into_inner();
+
+        info!("InitKubeconfig request received");
+
+        if req.client_cert_pem.is_empty() {
+            return Err(Status::invalid_argument("client_cert_pem is required"));
+        }
+
+        // Create operational trusted clients directory
+        let cert_dir = "/var/lib/keel/crypto/trusted-clients/operational";
+        std::fs::create_dir_all(cert_dir)
+            .map_err(|e| Status::internal(format!("Failed to create cert directory: {}", e)))?;
+
+        // Generate a unique ID for this client
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        req.client_cert_pem.hash(&mut hasher);
+        let client_id = format!("{:x}", hasher.finish());
+
+        let cert_path = format!("{}/{}.pem", cert_dir, client_id);
+
+        // Write client certificate
+        std::fs::write(&cert_path, &req.client_cert_pem)
+            .map_err(|e| Status::internal(format!("Failed to write client certificate: {}", e)))?;
+
+        // If cluster CA provided, store it too
+        if !req.cluster_ca_pem.is_empty() {
+            let ca_path = "/var/lib/keel/crypto/cluster-ca.pem";
+            std::fs::write(&ca_path, &req.cluster_ca_pem)
+                .map_err(|e| Status::internal(format!("Failed to write cluster CA: {}", e)))?;
+            info!(path = %ca_path, "Cluster CA certificate stored");
+        }
+
+        // Clean up bootstrap certificates after operational certs are in place
+        let bootstrap_dir = "/var/lib/keel/crypto/trusted-clients/bootstrap";
+        if std::path::Path::new(bootstrap_dir).exists() {
+            info!("Cleaning up bootstrap certificates");
+            std::fs::remove_dir_all(bootstrap_dir).ok();
+        }
+
+        info!(
+            client_id = %client_id,
+            path = %cert_path,
+            "Operational client certificate stored"
+        );
+
+        Ok(Response::new(InitKubeconfigResponse {
+            success: true,
+            message: format!("Operational certificate accepted for client {}", client_id),
+            stored_cert_path: cert_path,
+        }))
+    }
+
+    async fn get_certificate_info(
+        &self,
+        _request: Request<GetCertificateInfoRequest>,
+    ) -> Result<Response<GetCertificateInfoResponse>, Status> {
+        debug!("GetCertificateInfo request received");
+
+        use keel_api::node::CertificateDetails;
+
+        // Check for trusted client certificates
+        let bootstrap_dir = "/var/lib/keel/crypto/trusted-clients/bootstrap";
+        let operational_dir = "/var/lib/keel/crypto/trusted-clients/operational";
+
+        let mut trusted_clients = Vec::new();
+
+        // List bootstrap clients
+        if let Ok(entries) = std::fs::read_dir(bootstrap_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    trusted_clients.push(format!("bootstrap:{}", name));
+                }
+            }
+        }
+
+        // List operational clients
+        if let Ok(entries) = std::fs::read_dir(operational_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    trusted_clients.push(format!("operational:{}", name));
+                }
+            }
+        }
+
+        // For now, return simple existence info
+        // In a full implementation, we'd parse each cert and extract details
+        let bootstrap_exists = std::path::Path::new(bootstrap_dir).exists()
+            && std::fs::read_dir(bootstrap_dir).map(|mut d| d.next().is_some()).unwrap_or(false);
+
+        let operational_exists = std::path::Path::new(operational_dir).exists()
+            && std::fs::read_dir(operational_dir).map(|mut d| d.next().is_some()).unwrap_or(false);
+
+        Ok(Response::new(GetCertificateInfoResponse {
+            bootstrap: Some(CertificateDetails {
+                exists: bootstrap_exists,
+                subject: if bootstrap_exists { "Bootstrap clients".to_string() } else { String::new() },
+                issuer: String::new(),
+                not_before: String::new(),
+                not_after: String::new(),
+                is_expired: false,
+                days_until_expiry: if bootstrap_exists { 1 } else { 0 },
+            }),
+            operational: Some(CertificateDetails {
+                exists: operational_exists,
+                subject: if operational_exists { "Operational clients".to_string() } else { String::new() },
+                issuer: String::new(),
+                not_before: String::new(),
+                not_after: String::new(),
+                is_expired: false,
+                days_until_expiry: if operational_exists { 365 } else { 0 },
+            }),
+            trusted_clients,
+        }))
+    }
+
+    async fn rotate_certificate(
+        &self,
+        request: Request<RotateCertificateRequest>,
+    ) -> Result<Response<RotateCertificateResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(auto_approve = req.auto_approve, "RotateCertificate request received");
+
+        if req.new_cert_pem.is_empty() {
+            return Err(Status::invalid_argument("new_cert_pem is required"));
+        }
+
+        // Archive old operational certificates
+        let operational_dir = "/var/lib/keel/crypto/trusted-clients/operational";
+        let archive_dir = "/var/lib/keel/crypto/trusted-clients/archived";
+
+        std::fs::create_dir_all(archive_dir)
+            .map_err(|e| Status::internal(format!("Failed to create archive directory: {}", e)))?;
+
+        // Move existing certs to archive
+        let mut archived_path = String::new();
+        if let Ok(entries) = std::fs::read_dir(operational_dir) {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.file_name().to_str() {
+                    let old_path = entry.path();
+                    let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S");
+                    let new_name = format!("{}_{}", timestamp, name);
+                    let new_path = format!("{}/{}", archive_dir, new_name);
+                    if std::fs::rename(&old_path, &new_path).is_ok() {
+                        info!(from = ?old_path, to = %new_path, "Archived old certificate");
+                        archived_path = new_path;
+                    }
+                }
+            }
+        }
+
+        // Store new certificate
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        req.new_cert_pem.hash(&mut hasher);
+        let client_id = format!("{:x}", hasher.finish());
+
+        let new_cert_path = format!("{}/{}.pem", operational_dir, client_id);
+        std::fs::write(&new_cert_path, &req.new_cert_pem)
+            .map_err(|e| Status::internal(format!("Failed to write new certificate: {}", e)))?;
+
+        info!(
+            client_id = %client_id,
+            new_path = %new_cert_path,
+            "Certificate rotated successfully"
+        );
+
+        Ok(Response::new(RotateCertificateResponse {
+            success: true,
+            message: "Certificate rotated successfully".to_string(),
+            new_cert_path,
+            archived_old_cert_path: archived_path,
         }))
     }
 }
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

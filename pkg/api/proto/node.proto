@@ -35,6 +35,20 @@ service NodeService {
   
   // Get Kubernetes bootstrap status
   rpc GetBootstrapStatus (GetBootstrapStatusRequest) returns (GetBootstrapStatusResponse);
+  
+  // Certificate management
+  
+  // Initialize with bootstrap certificates (unauthenticated)
+  rpc InitBootstrap (InitBootstrapRequest) returns (InitBootstrapResponse);
+  
+  // Initialize with Kubernetes PKI certificates
+  rpc InitKubeconfig (InitKubeconfigRequest) returns (InitKubeconfigResponse);
+  
+  // Get certificate information
+  rpc GetCertificateInfo (GetCertificateInfoRequest) returns (GetCertificateInfoResponse);
+  
+  // Rotate certificates
+  rpc RotateCertificate (RotateCertificateRequest) returns (RotateCertificateResponse);
 }
 
 message InstallUpdateRequest {
@@ -231,4 +245,63 @@ message GetBootstrapStatusResponse {
   
   // Bootstrap timestamp (RFC3339)
   string bootstrapped_at = 5;
+}
+
+// Certificate Management Messages
+
+message InitBootstrapRequest {
+  // Client's public certificate in PEM format
+  string client_cert_pem = 1;
+}
+
+message InitBootstrapResponse {
+  bool success = 1;
+  string message = 2;
+  // Path where node stored the trusted client cert
+  string stored_cert_path = 3;
+}
+
+message InitKubeconfigRequest {
+  // Client's operational certificate in PEM format (K8s-signed)
+  string client_cert_pem = 1;
+  // Cluster CA certificate in PEM format
+  string cluster_ca_pem = 2;
+}
+
+message InitKubeconfigResponse {
+  bool success = 1;
+  string message = 2;
+  // Path where node stored the trusted client cert
+  string stored_cert_path = 3;
+}
+
+message GetCertificateInfoRequest {}
+
+message GetCertificateInfoResponse {
+  CertificateDetails bootstrap = 1;
+  CertificateDetails operational = 2;
+  repeated string trusted_clients = 3;
+}
+
+message CertificateDetails {
+  bool exists = 1;
+  string subject = 2;
+  string issuer = 3;
+  string not_before = 4;
+  string not_after = 5;
+  bool is_expired = 6;
+  int64 days_until_expiry = 7;
+}
+
+message RotateCertificateRequest {
+  // New client certificate in PEM format
+  string new_cert_pem = 1;
+  bool auto_approve = 2;
+}
+
+message RotateCertificateResponse {
+  bool success = 1;
+  string message = 2;
+  string new_cert_path = 3;
+  string archived_old_cert_path = 4;
 }
