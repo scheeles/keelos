@@ -15,16 +15,14 @@ use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
     BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
     CancelScheduledUpdateResponse, GetBootstrapStatusRequest, GetBootstrapStatusResponse,
-    GetCertificateInfoRequest, GetCertificateInfoResponse,
-    GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
-    GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
+    GetCertificateInfoRequest, GetCertificateInfoResponse, GetHealthRequest, GetHealthResponse,
+    GetRollbackHistoryRequest, GetRollbackHistoryResponse, GetStatusRequest, GetStatusResponse,
+    GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
-    InitKubeconfigRequest, InitKubeconfigResponse,
-    InstallUpdateRequest, RebootRequest,
+    InitKubeconfigRequest, InitKubeconfigResponse, InstallUpdateRequest, RebootRequest,
     RebootResponse, RollbackEvent, RotateCertificateRequest, RotateCertificateResponse,
-    ScheduleUpdateRequest, ScheduleUpdateResponse,
-    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
-    UpdateSchedule as ProtoUpdateSchedule,
+    ScheduleUpdateRequest, ScheduleUpdateResponse, TriggerRollbackRequest, TriggerRollbackResponse,
+    UpdateProgress, UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -560,7 +558,7 @@ impl NodeService for HelperNodeService {
             node_name: config.node_name,
             kubeconfig_path: config.kubeconfig_path,
             bootstrapped_at: config.bootstrapped_at,
-        })))
+        }))
     }
 
     async fn init_bootstrap(
@@ -699,15 +697,23 @@ impl NodeService for HelperNodeService {
         // For now, return simple existence info
         // In a full implementation, we'd parse each cert and extract details
         let bootstrap_exists = std::path::Path::new(bootstrap_dir).exists()
-            && std::fs::read_dir(bootstrap_dir).map(|mut d| d.next().is_some()).unwrap_or(false);
+            && std::fs::read_dir(bootstrap_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false);
 
         let operational_exists = std::path::Path::new(operational_dir).exists()
-            && std::fs::read_dir(operational_dir).map(|mut d| d.next().is_some()).unwrap_or(false);
+            && std::fs::read_dir(operational_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false);
 
         Ok(Response::new(GetCertificateInfoResponse {
             bootstrap: Some(CertificateDetails {
                 exists: bootstrap_exists,
-                subject: if bootstrap_exists { "Bootstrap clients".to_string() } else { String::new() },
+                subject: if bootstrap_exists {
+                    "Bootstrap clients".to_string()
+                } else {
+                    String::new()
+                },
                 issuer: String::new(),
                 not_before: String::new(),
                 not_after: String::new(),
@@ -716,7 +722,11 @@ impl NodeService for HelperNodeService {
             }),
             operational: Some(CertificateDetails {
                 exists: operational_exists,
-                subject: if operational_exists { "Operational clients".to_string() } else { String::new() },
+                subject: if operational_exists {
+                    "Operational clients".to_string()
+                } else {
+                    String::new()
+                },
                 issuer: String::new(),
                 not_before: String::new(),
                 not_after: String::new(),
@@ -733,7 +743,10 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<RotateCertificateResponse>, Status> {
         let req = request.into_inner();
 
-        info!(auto_approve = req.auto_approve, "RotateCertificate request received");
+        info!(
+            auto_approve = req.auto_approve,
+            "RotateCertificate request received"
+        );
 
         if req.new_cert_pem.is_empty() {
             return Err(Status::invalid_argument("new_cert_pem is required"));
@@ -788,7 +801,6 @@ impl NodeService for HelperNodeService {
         }))
     }
 }
-
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
