@@ -200,6 +200,28 @@ jobs:
           chmod +x tools/testing/*.sh
           ./tools/testing/test-integration.sh
 
+  test-network:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: keelos-build
+          path: build/
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Run Network Integration Test
+        run: |
+          chmod +x tools/testing/*.sh
+          ./tools/testing/test-network.sh
+
   test-artifacts:
     needs: [build]
     runs-on: ubuntu-latest
