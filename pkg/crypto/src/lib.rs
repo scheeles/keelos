@@ -16,6 +16,51 @@ pub enum CryptoError {
     Cert(String),
 }
 
+/// Parse certificate expiry from PEM-encoded certificate
+pub fn parse_cert_expiry(cert_pem: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+    use chrono::TimeZone;
+    use x509_parser::prelude::*;
+
+    // Parse PEM to get DER bytes
+    let pem_data = ::pem::parse(cert_pem).map_err(|e| format!("Failed to parse PEM: {}", e))?;
+
+    // Parse X.509 certificate from DER
+    let (_, cert) = X509Certificate::from_der(pem_data.contents())
+        .map_err(|e| format!("Failed to parse X.509 certificate: {}", e))?;
+
+    // Get notAfter (expiry) timestamp
+    let not_after = cert.validity().not_after;
+    let timestamp = not_after.timestamp();
+
+    // Convert to DateTime
+    chrono::Utc
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .ok_or_else(|| "Invalid timestamp in certificate".to_string())
+}
+
+/// Check if a certificate needs renewal based on threshold
+pub fn check_cert_needs_renewal(
+    cert_path: &str,
+    renewal_threshold_days: u32,
+) -> Result<bool, String> {
+    use std::fs;
+
+    // Read certificate file
+    let cert_pem =
+        fs::read_to_string(cert_path).map_err(|e| format!("Failed to read certificate: {}", e))?;
+
+    // Parse expiry
+    let expiry = parse_cert_expiry(&cert_pem)?;
+
+    // Calculate threshold
+    let now = chrono::Utc::now();
+    let renewal_deadline = expiry - chrono::Duration::days(renewal_threshold_days as i64);
+
+    // Check if we're past the renewal deadline
+    Ok(now >= renewal_deadline)
+}
+
 /// Load certificates from a PEM file
 pub fn load_certs<P: AsRef<Path>>(path: P) -> Result<Vec<CertificateDer<'static>>, CryptoError> {
     let file = File::open(path)?;

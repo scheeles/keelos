@@ -10,6 +10,9 @@ rcgen = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 time = "0.3"
+x509-parser = "0.15"
+chrono = "0.4"
+pem = "3.0"
 
 [lib]
 name = "keel_crypto"

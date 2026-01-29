@@ -30,6 +30,7 @@ use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+mod cert_renewal;
 mod disk;
 mod health;
 mod health_check;
@@ -677,12 +678,19 @@ impl NodeService for HelperNodeService {
 
                 info!("✓ Certificate rotation successful");
 
-                // TODO: Parse actual expiry from certificate
+                // Parse actual expiry from certificate
+                let expires_at = keel_crypto::parse_cert_expiry(&cert_pem)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|e| {
+                        warn!("Failed to parse certificate expiry: {}", e);
+                        "Unknown".to_string()
+                    });
+
                 Ok(Response::new(RotateCertificateResponse {
                     success: true,
                     message: "Certificate rotated successfully".to_string(),
                     cert_path: cert_path.to_string(),
-                    expires_at: "365 days from now".to_string(),
+                    expires_at,
                 }))
             }
             Err(e) => {
@@ -798,6 +806,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("K8s operational certificates initialized:");
         info!("  Cert: {}", cert_path);
         info!("  Key: {}", key_path);
+    }
+
+    // Start certificate auto-renewal daemon if operational cert exists
+    let operational_cert_path = "/var/lib/keel/crypto/operational.pem";
+    if std::path::Path::new(operational_cert_path).exists() {
+        use cert_renewal::{CertRenewalConfig, CertRenewalManager};
+
+        let renewal_config = CertRenewalConfig {
+            operational_cert_path: operational_cert_path.to_string(),
+            operational_key_path: "/var/lib/keel/crypto/operational.key".to_string(),
+            renewal_threshold_days: 30, // Renew 30 days before expiry
+            check_interval_hours: 24,   // Check once per day
+        };
+
+        let renewal_manager = Arc::new(CertRenewalManager::new(renewal_config));
+
+        tokio::spawn(async move {
+            renewal_manager.start_renewal_loop().await;
+        });
+
+        info!("Certificate auto-renewal enabled (threshold: 30 days, check interval: 24 hours)");
     }
 
     // Load declarative configuration
