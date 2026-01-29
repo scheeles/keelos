@@ -101,3 +101,35 @@ Our approach is better because:
 - ✅ Direct disk access (no container overhead)
 - ✅ Native systemd integration
 - ✅ Part of immutable OS image
+
+## Certificate Management
+
+### Automatic Initialization
+
+When the agent starts in a K8s cluster:
+
+1. Detects K8s environment (checks for service account token)
+2. Reads `NODE_NAME` from environment
+3. Creates K8s CSR for operational certificate
+4. Auto-approves CSR (requires RBAC permissions)
+5. Waits for K8s to sign certificate
+6. Stores cert in `/var/lib/keel/crypto/operational.{pem,key}`
+7. Starts auto-renewal daemon
+
+### Auto-Renewal
+
+- **Checks:** Every 24 hours
+- **Threshold:** Renews 30 days before expiry
+- **Backup:** Old certificates saved before renewal
+- **Metrics:** Exported via OpenTelemetry
+
+### Monitoring
+
+```promql
+# Prometheus queries
+keel_certificate_days_remaining
+keel_certificate_renewals_success
+keel_certificate_renewals_errors
+```
+
+See [Certificate Management Guide](../docs/certificate-management.md) for complete documentation.
