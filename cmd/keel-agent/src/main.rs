@@ -18,8 +18,9 @@ use keel_api::node::{
     GetHealthRequest, GetHealthResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
-    InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, ScheduleUpdateRequest,
-    ScheduleUpdateResponse, TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
+    InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, RotateCertificateRequest,
+    RotateCertificateResponse, ScheduleUpdateRequest, ScheduleUpdateResponse,
+    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
     UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
@@ -614,64 +615,21 @@ impl NodeService for HelperNodeService {
         }))
     }
 
-    // TODO: Uncomment after proto regeneration (requires RotateCertificateRequest/Response types)
-    //
-    // async fn rotate_certificate(
-    //     &self,
-    //     request: Request<RotateCertificateRequest>,
-    // ) -> Result<Response<RotateCertificateResponse>, Status> {
-    //     use k8s_csr::K8sCsrManager;
-    //     
-    //     let req = request.into_inner();
-    //     info!("Certificate rotation requested (force: {})", req.force);
-    //
-    //     // Check if running in K8s
-    //     if !std::path::Path::new("/var/run/secrets/kubernetes.io/serviceaccount/token").exists() {
-    //         return Err(Status::failed_precondition(
-    //             "Not running in Kubernetes - rotation only available in K8s clusters"
-    //         ));
-    //     }
-    //
-    //     // Get node name
-    //     let node_name = std::env::var("NODE_NAME")
-    //         .ok()
-    //         .or_else(|| hostname::get().ok().and_then(|h| h.into_string().ok()))
-    //         .ok_or_else(|| Status::internal("Failed to determine node name"))?;
-    //
-    //     // Create CSR manager and request new certificate
-    //     let csr_manager = K8sCsrManager::new(node_name)
-    //         .await
-    //         .map_err(|e| Status::internal(format!("Failed to initialize CSR manager: {}", e)))?;
-    //
-    //     match csr_manager.request_certificate().await {
-    //         Ok((cert_pem, key_pem)) => {
-    //             // Store new certificates
-    //             let cert_path = "/var/lib/keel/crypto/operational.pem";
-    //             let key_path = "/var/lib/keel/crypto/operational.key";
-    //
-    //             if let Err(e) = std::fs::write(cert_path, &cert_pem) {
-    //                 return Err(Status::internal(format!("Failed to write certificate: {}", e)));
-    //             }
-    //
-    //             if let Err(e) = std::fs::write(key_path, &key_pem) {
-    //                 return Err(Status::internal(format!("Failed to write key: {}", e)));
-    //             }
-    //
-    //             info!("✓ Certificate rotation successful");
-    //
-    //             Ok(Response::new(RotateCertificateResponse {
-    //                 success: true,
-    //                 message: "Certificate rotated successfully".to_string(),
-    //                 cert_path: cert_path.to_string(),
-    //                 expires_at: "365 days from now".to_string(), // TODO: Parse actual expiry from cert
-    //             }))
-    //         }
-    //         Err(e) => {
-    //             error!("Certificate rotation failed: {}", e);
-    //             Err(Status::internal(format!("Rotation failed: {}", e)))
-    //         }
-    //     }
-    // }
+    async fn rotate_certificate(
+        &self,
+        _request: Request<RotateCertificateRequest>,
+    ) -> Result<Response<RotateCertificateResponse>, Status> {
+        // TODO: Full implementation pending - requires working proto regeneration
+        // This stub satisfies the trait requirement
+        Err(Status::unimplemented(
+            "Certificate rotation not yet implemented - requires proto regeneration",
+        ))
+
+        // Full implementation (uncomment after proto regen):
+        // use k8s_csr::K8sCsrManager;
+        // let req = request.into_inner();
+        // Check K8s environment, get node name, request CSR, store certs
+    }
 }
 
 /// Initialize operational certificates if running in Kubernetes
