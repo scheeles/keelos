@@ -34,6 +34,12 @@ pub async fn configure_network(
                     } else {
                         static_cfg.mtu
                     },
+                    ipv6_addresses: static_cfg.ipv6_addresses,
+                    ipv6_gateway: if static_cfg.ipv6_gateway.is_empty() {
+                        None
+                    } else {
+                        Some(static_cfg.ipv6_gateway)
+                    },
                 })
             }
             Some(network_interface::Config::Vlan(vlan_cfg)) => {
@@ -51,6 +57,12 @@ pub async fn configure_network(
                                     Some(s.gateway)
                                 },
                                 mtu: if s.mtu == 0 { 1500 } else { s.mtu },
+                                ipv6_addresses: s.ipv6_addresses,
+                                ipv6_gateway: if s.ipv6_gateway.is_empty() {
+                                    None
+                                } else {
+                                    Some(s.ipv6_gateway)
+                                },
                             },
                         )
                     }
@@ -85,6 +97,12 @@ pub async fn configure_network(
                                     Some(s.gateway)
                                 },
                                 mtu: if s.mtu == 0 { 1500 } else { s.mtu },
+                                ipv6_addresses: s.ipv6_addresses,
+                                ipv6_gateway: if s.ipv6_gateway.is_empty() {
+                                    None
+                                } else {
+                                    Some(s.ipv6_gateway)
+                                },
                             },
                         )
                     }
@@ -194,6 +212,8 @@ pub async fn get_network_config(
                                 ipv4_address: cfg.ipv4_address,
                                 gateway: cfg.gateway.unwrap_or_default(),
                                 mtu: cfg.mtu,
+                                ipv6_addresses: cfg.ipv6_addresses,
+                                ipv6_gateway: cfg.ipv6_gateway.unwrap_or_default(),
                             }))
                         }
                         keel_config::network::InterfaceType::Vlan(cfg) => {
@@ -206,6 +226,8 @@ pub async fn get_network_config(
                                         ipv4_address: s.ipv4_address,
                                         gateway: s.gateway.unwrap_or_default(),
                                         mtu: s.mtu,
+                                        ipv6_addresses: s.ipv6_addresses,
+                                        ipv6_gateway: s.ipv6_gateway.unwrap_or_default(),
                                     }))
                                 }
                             };
@@ -226,6 +248,8 @@ pub async fn get_network_config(
                                         ipv4_address: s.ipv4_address,
                                         gateway: s.gateway.unwrap_or_default(),
                                         mtu: s.mtu,
+                                        ipv6_addresses: s.ipv6_addresses,
+                                        ipv6_gateway: s.ipv6_gateway.unwrap_or_default(),
                                     }))
                                 }
                             };
@@ -302,6 +326,7 @@ pub async fn get_network_status(
                     mac_address: String::new(),
                     mtu: 0,
                     statistics: None,
+                    ipv6_addresses: vec![],
                 };
 
                 // Read operstate
@@ -334,6 +359,22 @@ pub async fn get_network_status(
                             if line.trim().starts_with("inet ") {
                                 if let Some(addr) = line.split_whitespace().nth(1) {
                                     iface_status.ipv4_addresses.push(addr.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Get IPv6 addresses using ip command
+                if let Ok(output) = std::process::Command::new("/bin/ip")
+                    .args(["-6", "addr", "show", iface_name])
+                    .output()
+                {
+                    if let Ok(stdout) = String::from_utf8(output.stdout) {
+                        for line in stdout.lines() {
+                            if line.trim().starts_with("inet6 ") {
+                                if let Some(addr) = line.split_whitespace().nth(1) {
+                                    iface_status.ipv6_addresses.push(addr.to_string());
                                 }
                             }
                         }

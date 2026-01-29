@@ -334,11 +334,18 @@ message StaticConfig {
   // IPv4 address with CIDR notation (e.g., "192.168.1.100/24")
   string ipv4_address = 1;
   
-  // Gateway IP address
+  // IPv4 gateway IP address
   string gateway = 2;
   
   // MTU (optional, default 1500)
   uint32 mtu = 3;
+  
+  // IPv6 addresses with CIDR notation (e.g., "2001:db8::1/64")
+  // Multiple IPv6 addresses can be assigned to a single interface
+  repeated string ipv6_addresses = 4;
+  
+  // IPv6 gateway IP address
+  string ipv6_gateway = 5;
 }
 
 message VLANConfig {
@@ -406,6 +413,9 @@ message InterfaceStatus {
   
   // Statistics
   InterfaceStatistics statistics = 6;
+  
+  // IPv6 addresses
+  repeated string ipv6_addresses = 7;
 }
 
 message InterfaceStatistics {

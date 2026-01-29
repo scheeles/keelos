@@ -113,14 +113,20 @@ enum NetworkConfigAction {
         #[arg(long)]
         interface: String,
         /// Use DHCP for this interface
-        #[arg(long, conflicts_with_all = ["ip", "gateway"])]
+        #[arg(long, conflicts_with_all = ["ip", "gateway", "ipv6", "ipv6_gateway"])]
         dhcp: bool,
-        /// Static IP address in CIDR notation (e.g., 192.168.1.10/24)
+        /// Static IPv4 address in CIDR notation (e.g., 192.168.1.10/24)
         #[arg(long)]
         ip: Option<String>,
-        /// Gateway IP address
+        /// IPv4 gateway IP address
         #[arg(long)]
         gateway: Option<String>,
+        /// IPv6 addresses in CIDR notation (can be specified multiple times)
+        #[arg(long)]
+        ipv6: Vec<String>,
+        /// IPv6 gateway IP address
+        #[arg(long)]
+        ipv6_gateway: Option<String>,
         /// MTU (default: 1500)
         #[arg(long)]
         mtu: Option<u32>,
@@ -436,6 +442,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     dhcp,
                     ip,
                     gateway,
+                    ipv6,
+                    ipv6_gateway,
                     mtu,
                     auto_reboot,
                 } => {
@@ -444,16 +452,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Some(keel_api::node::network_interface::Config::Dhcp(
                             DhcpConfig { enabled: true },
                         ))
-                    } else if let Some(ip_addr) = ip {
+                    } else if ip.is_some() || !ipv6.is_empty() {
                         Some(keel_api::node::network_interface::Config::Static(
                             StaticConfig {
-                                ipv4_address: ip_addr.clone(),
+                                ipv4_address: ip.clone().unwrap_or_default(),
                                 gateway: gateway.clone().unwrap_or_default(),
                                 mtu: mtu.unwrap_or(1500),
+                                ipv6_addresses: ipv6.clone(),
+                                ipv6_gateway: ipv6_gateway.clone().unwrap_or_default(),
                             },
                         ))
                     } else {
-                        eprintln!("Error: Either --dhcp or --ip must be specified");
+                        eprintln!("Error: Either --dhcp, --ip, or --ipv6 must be specified");
                         std::process::exit(1);
                     };
 
@@ -500,9 +510,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     keel_api::node::network_interface::Config::Static(s) => {
                                         println!("  Type: Static");
-                                        println!("  IP: {}", s.ipv4_address);
-                                        if !s.gateway.is_empty() {
-                                            println!("  Gateway: {}", s.gateway);
+                                        if !s.ipv4_address.is_empty() {
+                                            println!("  IPv4: {}", s.ipv4_address);
+                                            if !s.gateway.is_empty() {
+                                                println!("  IPv4 Gateway: {}", s.gateway);
+                                            }
+                                        }
+                                        if !s.ipv6_addresses.is_empty() {
+                                            println!("  IPv6: {}", s.ipv6_addresses.join(", "));
+                                            if !s.ipv6_gateway.is_empty() {
+                                                println!("  IPv6 Gateway: {}", s.ipv6_gateway);
+                                            }
                                         }
                                         println!("  MTU: {}", s.mtu);
                                     }
@@ -564,6 +582,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         if !iface.ipv4_addresses.is_empty() {
                             println!("  IPv4: {}", iface.ipv4_addresses.join(", "));
+                        }
+
+                        if !iface.ipv6_addresses.is_empty() {
+                            println!("  IPv6: {}", iface.ipv6_addresses.join(", "));
                         }
 
                         if let Some(stats) = iface.statistics {

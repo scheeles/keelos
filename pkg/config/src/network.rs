@@ -81,15 +81,25 @@ pub enum InterfaceType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StaticConfig {
     /// IPv4 address with CIDR notation (e.g., "192.168.1.100/24")
+    #[serde(default)]
     pub ipv4_address: String,
 
-    /// Gateway IP address
+    /// IPv4 gateway IP address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gateway: Option<String>,
 
     /// MTU (default: 1500)
     #[serde(default = "default_mtu")]
     pub mtu: u32,
+
+    /// IPv6 addresses with CIDR notation (e.g., "2001:db8::1/64")
+    /// Multiple IPv6 addresses can be assigned to a single interface
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ipv6_addresses: Vec<String>,
+
+    /// IPv6 gateway IP address
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipv6_gateway: Option<String>,
 }
 
 fn default_mtu() -> u32 {
@@ -300,15 +310,37 @@ impl InterfaceConfig {
 impl StaticConfig {
     /// Validate static IP configuration
     fn validate(&self) -> Result<(), NetworkConfigError> {
-        // Validate IPv4 address with CIDR
-        self.ipv4_address
-            .parse::<Ipv4Network>()
-            .map_err(|_| NetworkConfigError::InvalidCidr(self.ipv4_address.clone()))?;
+        // Ensure at least one IP address is configured
+        if self.ipv4_address.is_empty() && self.ipv6_addresses.is_empty() {
+            return Err(NetworkConfigError::Validation(
+                "Static configuration must have at least one IP address (IPv4 or IPv6)".to_string(),
+            ));
+        }
 
-        // Validate gateway if present
-        if let Some(ref gw) = self.gateway {
-            gw.parse::<Ipv4Addr>()
-                .map_err(|_| NetworkConfigError::InvalidIpAddress(gw.clone()))?;
+        // Validate IPv4 address with CIDR if present
+        if !self.ipv4_address.is_empty() {
+            self.ipv4_address
+                .parse::<Ipv4Network>()
+                .map_err(|_| NetworkConfigError::InvalidCidr(self.ipv4_address.clone()))?;
+
+            // Validate IPv4 gateway if present
+            if let Some(ref gw) = self.gateway {
+                gw.parse::<Ipv4Addr>()
+                    .map_err(|_| NetworkConfigError::InvalidIpAddress(gw.clone()))?;
+            }
+        }
+
+        // Validate IPv6 addresses with CIDR
+        for ipv6_addr in &self.ipv6_addresses {
+            ipv6_addr
+                .parse::<Ipv6Network>()
+                .map_err(|_| NetworkConfigError::InvalidCidr(ipv6_addr.clone()))?;
+        }
+
+        // Validate IPv6 gateway if present
+        if let Some(ref gw6) = self.ipv6_gateway {
+            gw6.parse::<Ipv6Addr>()
+                .map_err(|_| NetworkConfigError::InvalidIpAddress(gw6.clone()))?;
         }
 
         // Validate MTU range
@@ -417,26 +449,85 @@ mod tests {
 
     #[test]
     fn test_static_config_validation() {
-        let valid = StaticConfig {
+        // Valid IPv4 only
+        let valid_ipv4 = StaticConfig {
             ipv4_address: "192.168.1.100/24".to_string(),
             gateway: Some("192.168.1.1".to_string()),
             mtu: 1500,
+            ipv6_addresses: vec![],
+            ipv6_gateway: None,
         };
-        assert!(valid.validate().is_ok());
+        assert!(valid_ipv4.validate().is_ok());
 
-        let invalid_cidr = StaticConfig {
-            ipv4_address: "192.168.1.100".to_string(), // Missing /24
+        // Valid IPv6 only
+        let valid_ipv6 = StaticConfig {
+            ipv4_address: String::new(),
             gateway: None,
             mtu: 1500,
+            ipv6_addresses: vec!["2001:db8::1/64".to_string()],
+            ipv6_gateway: Some("2001:db8::ff".to_string()),
+        };
+        assert!(valid_ipv6.validate().is_ok());
+
+        // Valid dual-stack
+        let valid_dual = StaticConfig {
+            ipv4_address: "192.168.1.100/24".to_string(),
+            gateway: Some("192.168.1.1".to_string()),
+            mtu: 1500,
+            ipv6_addresses: vec!["2001:db8::1/64".to_string(), "fd00::1/64".to_string()],
+            ipv6_gateway: Some("2001:db8::ff".to_string()),
+        };
+        assert!(valid_dual.validate().is_ok());
+
+        // Invalid: no IP addresses
+        let no_ips = StaticConfig {
+            ipv4_address: String::new(),
+            gateway: None,
+            mtu: 1500,
+            ipv6_addresses: vec![],
+            ipv6_gateway: None,
+        };
+        assert!(no_ips.validate().is_err());
+
+        // Invalid IPv4 CIDR
+        let invalid_cidr = StaticConfig {
+            ipv4_address: "999.999.999.999/24".to_string(), // Invalid IP
+            gateway: None,
+            mtu: 1500,
+            ipv6_addresses: vec![],
+            ipv6_gateway: None,
         };
         assert!(invalid_cidr.validate().is_err());
 
+        // Invalid IPv4 gateway
         let invalid_gateway = StaticConfig {
             ipv4_address: "192.168.1.100/24".to_string(),
             gateway: Some("not-an-ip".to_string()),
             mtu: 1500,
+            ipv6_addresses: vec![],
+            ipv6_gateway: None,
         };
         assert!(invalid_gateway.validate().is_err());
+
+        // Invalid IPv6 CIDR
+        let invalid_ipv6_cidr = StaticConfig {
+            ipv4_address: String::new(),
+            gateway: None,
+            mtu: 1500,
+            ipv6_addresses: vec!["gggg::1/64".to_string()], // Invalid IPv6
+            ipv6_gateway: None,
+        };
+        assert!(invalid_ipv6_cidr.validate().is_err());
+
+        // Invalid IPv6 gateway
+        let invalid_ipv6_gateway = StaticConfig {
+            ipv4_address: String::new(),
+            gateway: None,
+            mtu: 1500,
+            ipv6_addresses: vec!["2001:db8::1/64".to_string()],
+            ipv6_gateway: Some("not-an-ipv6".to_string()),
+        };
+        assert!(invalid_ipv6_gateway.validate().is_err());
     }
 
     #[test]
@@ -480,6 +571,8 @@ mod tests {
                     ipv4_address: "10.0.2.100/24".to_string(),
                     gateway: Some("10.0.2.2".to_string()),
                     mtu: 1500,
+                    ipv6_addresses: vec!["2001:db8::100/64".to_string()],
+                    ipv6_gateway: Some("2001:db8::1".to_string()),
                 }),
             }],
             dns: Some(DnsConfig {

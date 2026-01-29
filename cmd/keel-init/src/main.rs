@@ -250,44 +250,91 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
             debug!(interface = %iface.name, "DHCP configuration (client not implemented)");
         }
         InterfaceType::Static(cfg) => {
-            // Add IP address
-            match Command::new("/bin/ip")
-                .args(["addr", "add", &cfg.ipv4_address, "dev", &iface.name])
-                .status()
-            {
-                Ok(status) if status.success() => {
-                    info!(interface = %iface.name, ip = %cfg.ipv4_address, "Static IP configured");
+            // Add IPv4 address if present
+            if !cfg.ipv4_address.is_empty() {
+                match Command::new("/bin/ip")
+                    .args(["addr", "add", &cfg.ipv4_address, "dev", &iface.name])
+                    .status()
+                {
+                    Ok(status) if status.success() => {
+                        info!(interface = %iface.name, ip = %cfg.ipv4_address, "Static IPv4 configured");
+                    }
+                    Ok(status) => {
+                        warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to set IPv4 address");
+                    }
+                    Err(e) => {
+                        warn!(interface = %iface.name, error = %e, "Failed to set IPv4 address");
+                    }
                 }
-                Ok(status) => {
-                    warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to set IP address");
-                }
-                Err(e) => {
-                    warn!(interface = %iface.name, error = %e, "Failed to set IP address");
+
+                // Set IPv4 gateway if present
+                if let Some(ref gateway) = cfg.gateway {
+                    match Command::new("/bin/ip")
+                        .args([
+                            "route",
+                            "add",
+                            "default",
+                            "via",
+                            gateway,
+                            "dev",
+                            &iface.name,
+                        ])
+                        .status()
+                    {
+                        Ok(status) if status.success() => {
+                            debug!(interface = %iface.name, gateway = %gateway, "IPv4 default route configured");
+                        }
+                        Ok(status) => {
+                            warn!(exit_code = ?status.code(), "Failed to set IPv4 default route");
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Failed to set IPv4 default route");
+                        }
+                    }
                 }
             }
 
-            // Set gateway if present
-            if let Some(ref gateway) = cfg.gateway {
+            // Add IPv6 addresses
+            for ipv6_addr in &cfg.ipv6_addresses {
+                match Command::new("/bin/ip")
+                    .args(["-6", "addr", "add", ipv6_addr, "dev", &iface.name])
+                    .status()
+                {
+                    Ok(status) if status.success() => {
+                        info!(interface = %iface.name, ip = %ipv6_addr, "Static IPv6 configured");
+                    }
+                    Ok(status) => {
+                        warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to set IPv6 address");
+                    }
+                    Err(e) => {
+                        warn!(interface = %iface.name, error = %e, "Failed to set IPv6 address");
+                    }
+                }
+            }
+
+            // Set IPv6 gateway if present
+            if let Some(ref gateway6) = cfg.ipv6_gateway {
                 match Command::new("/bin/ip")
                     .args([
+                        "-6",
                         "route",
                         "add",
                         "default",
                         "via",
-                        gateway,
+                        gateway6,
                         "dev",
                         &iface.name,
                     ])
                     .status()
                 {
                     Ok(status) if status.success() => {
-                        debug!(interface = %iface.name, gateway = %gateway, "Default route configured");
+                        debug!(interface = %iface.name, gateway = %gateway6, "IPv6 default route configured");
                     }
                     Ok(status) => {
-                        warn!(exit_code = ?status.code(), "Failed to set default route");
+                        warn!(exit_code = ?status.code(), "Failed to set IPv6 default route");
                     }
                     Err(e) => {
-                        warn!(error = %e, "Failed to set default route");
+                        warn!(error = %e, "Failed to set IPv6 default route");
                     }
                 }
             }
