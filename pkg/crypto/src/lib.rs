@@ -164,8 +164,8 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
     let issuer = cert.issuer().to_string();
 
     let validity = cert.validity();
-    let not_before = validity.not_before.to_rfc2822();
-    let not_after = validity.not_after.to_rfc2822();
+    let not_before = validity.not_before.to_rfc2822().map_err(|e| CryptoError::Cert(e))?;
+    let not_after = validity.not_after.to_rfc2822().map_err(|e| CryptoError::Cert(e))?;
 
     // Check expiry
     let now = ::time::OffsetDateTime::now_utc();
@@ -180,8 +180,8 @@ pub fn get_certificate_info<P: AsRef<Path>>(path: P) -> Result<CertificateInfo, 
         exists: true,
         subject,
         issuer,
-        not_before: not_before?,
-        not_after: not_after?,
+        not_before,
+        not_after,
         is_expired,
         days_until_expiry,
     })
