@@ -617,18 +617,79 @@ impl NodeService for HelperNodeService {
 
     async fn rotate_certificate(
         &self,
-        _request: Request<RotateCertificateRequest>,
+        request: Request<RotateCertificateRequest>,
     ) -> Result<Response<RotateCertificateResponse>, Status> {
-        // TODO: Full implementation pending - requires working proto regeneration
-        // This stub satisfies the trait requirement
-        Err(Status::unimplemented(
-            "Certificate rotation not yet implemented - requires proto regeneration",
-        ))
+        use k8s_csr::K8sCsrManager;
 
-        // Full implementation (uncomment after proto regen):
-        // use k8s_csr::K8sCsrManager;
-        // let req = request.into_inner();
-        // Check K8s environment, get node name, request CSR, store certs
+        let req = request.into_inner();
+        info!("Certificate rotation requested (force: {})", req.force);
+
+        // Check if running in K8s
+        if !std::path::Path::new("/var/run/secrets/kubernetes.io/serviceaccount/token").exists() {
+            return Err(Status::failed_precondition(
+                "Not running in Kubernetes - rotation only available in K8s clusters",
+            ));
+        }
+
+        // Get node name
+        let node_name = std::env::var("NODE_NAME")
+            .ok()
+            .or_else(|| hostname::get().ok().and_then(|h| h.into_string().ok()))
+            .ok_or_else(|| Status::internal("Failed to determine node name"))?;
+
+        info!("Rotating certificate for node: {}", node_name);
+
+        // Create K8s CSR manager and request new certificate
+        let csr_manager = K8sCsrManager::new(node_name)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to initialize CSR manager: {}", e)))?;
+
+        match csr_manager.request_certificate().await {
+            Ok((cert_pem, key_pem)) => {
+                // Store new certificates
+                let cert_path = "/var/lib/keel/crypto/operational.pem";
+                let key_path = "/var/lib/keel/crypto/operational.key";
+
+                // Create backup of old certificates
+                if std::path::Path::new(cert_path).exists() {
+                    let backup_cert = format!("{}.backup", cert_path);
+                    let backup_key = format!("{}.backup", key_path);
+                    if let Err(e) = std::fs::copy(cert_path, &backup_cert) {
+                        warn!("Failed to backup old certificate: {}", e);
+                    }
+                    if let Err(e) = std::fs::copy(key_path, &backup_key) {
+                        warn!("Failed to backup old key: {}", e);
+                    }
+                    info!("Backed up old certificates");
+                }
+
+                // Write new certificates
+                if let Err(e) = std::fs::write(cert_path, &cert_pem) {
+                    return Err(Status::internal(format!(
+                        "Failed to write new certificate: {}",
+                        e
+                    )));
+                }
+
+                if let Err(e) = std::fs::write(key_path, &key_pem) {
+                    return Err(Status::internal(format!("Failed to write new key: {}", e)));
+                }
+
+                info!("✓ Certificate rotation successful");
+
+                // TODO: Parse actual expiry from certificate
+                Ok(Response::new(RotateCertificateResponse {
+                    success: true,
+                    message: "Certificate rotated successfully".to_string(),
+                    cert_path: cert_path.to_string(),
+                    expires_at: "365 days from now".to_string(),
+                }))
+            }
+            Err(e) => {
+                error!("Certificate rotation failed: {}", e);
+                Err(Status::internal(format!("Rotation failed: {}", e)))
+            }
+        }
     }
 }
 
