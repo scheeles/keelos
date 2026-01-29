@@ -48,7 +48,7 @@ impl CertificateMetrics {
                     }
                 }
             })
-            .init();
+            .build();
 
         let state_for_days = cert_state.clone();
         let _days_gauge = meter
@@ -61,18 +61,18 @@ impl CertificateMetrics {
                     }
                 }
             })
-            .init();
+            .build();
 
         Ok(Self {
             renewals_success_counter: meter
                 .u64_counter("keel.certificate.renewals.success")
                 .with_description("Count of successful certificate renewals")
-                .init(),
+                .build(),
 
             renewals_error_counter: meter
                 .u64_counter("keel.certificate.renewals.errors")
                 .with_description("Count of failed certificate renewal attempts")
-                .init(),
+                .build(),
 
             cert_state,
         })
