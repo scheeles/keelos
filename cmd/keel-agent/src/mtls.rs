@@ -9,7 +9,6 @@ use std::path::Path;
 use tonic::transport::{Identity, ServerTlsConfig};
 use tracing::{info, warn};
 
-#[allow(dead_code)] // Will be used once mTLS integration is complete
 pub struct TlsManager {
     server_cert_path: String,
     server_key_path: String,
@@ -17,7 +16,6 @@ pub struct TlsManager {
     operational_ca_path: Option<String>,
 }
 
-#[allow(dead_code)] // Will be used once mTLS integration is complete
 impl TlsManager {
     pub fn new(
         server_cert_path: String,
@@ -86,10 +84,14 @@ impl TlsManager {
         let combined_ca = ca_certs.join("\n");
 
         if !combined_ca.is_empty() {
-            tls_config =
-                tls_config.client_ca_root(tonic::transport::Certificate::from_pem(combined_ca));
+            // Configure client CA but make it OPTIONAL
+            // This allows InitBootstrap to be called without a client cert
+            // while still verifying certs when they are presented
+            tls_config = tls_config
+                .client_ca_root(tonic::transport::Certificate::from_pem(combined_ca))
+                .client_auth_optional(true); // KEY: Make client auth optional
             info!(
-                "Configured dual-CA mTLS with {} CA certificates",
+                "Configured dual-CA mTLS with {} CA certificates (optional client auth)",
                 ca_certs.len()
             );
         } else {
