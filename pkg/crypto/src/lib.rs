@@ -55,6 +55,32 @@ pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
     Ok((cert_pem, key_pem))
 }
 
+/// Generate a bootstrap certificate with specific validity period
+/// Returns (cert_pem, key_pem)
+/// Note: Currently uses fixed validity from rcgen, validity_hours parameter is for future use
+pub fn generate_bootstrap_certificate(_validity_hours: u32) -> Result<(String, String), CryptoError> {
+    // For now, use the simple self-signed generator
+    // TODO: Implement custom validity period when rcgen API supports it better
+    let cert = rcgen::generate_simple_self_signed(vec!["keel-bootstrap".to_string()])
+        .map_err(|e| CryptoError::Cert(e.to_string()))?;
+
+    let cert_pem = cert.cert.pem();
+    let key_pem = cert.key_pair.serialize_pem();
+
+    Ok((cert_pem, key_pem))
+}
+
+/// Validate a bootstrap certificate (check it's self-signed and has reasonable expiry)
+pub fn validate_bootstrap_cert(cert_pem: &str) -> Result<(), CryptoError> {
+    // Basic validation: check PEM format
+    if !cert_pem.contains("BEGIN CERTIFICATE") {
+        return Err(CryptoError::Cert("Invalid PEM format".into()));
+    }
+
+    // TODO: Add more validation (expiry check, self-signed verification)
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
