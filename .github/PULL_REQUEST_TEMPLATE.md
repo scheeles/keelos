@@ -1,6 +1,8 @@
 ## Description
 <!-- Provide a clear and concise description of what this PR does -->
 
+**Which issue(s) this PR fixes**:
+<!--optional, in `fixes #<issue number>` format, will close the issue(s) when PR gets merged-->
 
 ## Type of Change
 <!-- Mark the relevant option with an "x" -->
@@ -14,34 +16,25 @@
 - [ ] CI/CD changes
 - [ ] Dependency updates
 
-## Related Issues
-<!-- Link related issues using "Fixes #123" or "Relates to #123" -->
+**Does this PR introduce a user-facing change? Then add your Release Note here**:
+<!--
+Write your release note. Release notes are being used to generate the changelog:
+1. Enter your extended release note in the below block. If the PR requires additional action from users switching to the new release, include the string "action required".
+2. If no release note is required, just write "NONE".
+-->
+```release-note
 
+```
 
-## Testing Done
-<!-- Describe the testing you've performed -->
+**Documentation**:
+<!--
+Please do one of the following options:
+- Add a link to the existing documentation
+- Add a link to the kubermatic/docs pull request
+- If no documentation change is applicable then add:
+  - TBD (documentation will be added later)
+  - NONE (no documentation needed for this PR)
+-->
+```documentation
 
-- [ ] Local build successful
-- [ ] Unit tests pass
-- [ ] Integration tests pass
-- [ ] Tested in QEMU
-- [ ] Manual testing performed
-
-**Test Details:**
-<!-- Provide specifics about what was tested and how -->
-
-
-## Checklist
-<!-- Mark completed items with an "x" -->
-
-- [ ] My code follows the project's style guide
-- [ ] I have performed a self-review of my code
-- [ ] I have commented my code, particularly in hard-to-understand areas
-- [ ] I have made corresponding changes to the documentation
-- [ ] My changes generate no new warnings or errors
-- [ ] I have added tests that prove my fix is effective or that my feature works
-- [ ] New and existing unit tests pass locally with my changes
-- [ ] Any dependent changes have been merged and published
-
-## Additional Context
-<!-- Add any other context, screenshots, or information about the PR here -->
+```
