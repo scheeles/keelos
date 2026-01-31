@@ -136,15 +136,15 @@ STATUS_OUTPUT=$("${OSCTL}" --endpoint "${ENDPOINT}" bootstrap-status 2>&1)
 echo "${STATUS_OUTPUT}"
 
 # Check if bootstrapped
-if echo "${STATUS_OUTPUT}" | grep -q "is_bootstrapped.*true"; then
-    echo "✓ Bootstrap status: is_bootstrapped = true"
+if echo "${STATUS_OUTPUT}" | grep -q "Node is bootstrapped"; then
+    echo "✓ Bootstrap status: Node is bootstrapped"
 else
-    echo "!!! FAIL: Bootstrap status shows is_bootstrapped = false !!!"
+    echo "!!! FAIL: Bootstrap status shows node is NOT bootstrapped !!!"
     exit 1
 fi
 
 # Check API server endpoint
-if echo "${STATUS_OUTPUT}" | grep -q "https://10.0.2.2:6443"; then
+if echo "${STATUS_OUTPUT}" | grep -q "API Server.*https://10.0.2.2:6443"; then
     echo "✓ API server endpoint is correct"
 else
     echo "!!! FAIL: API server endpoint mismatch !!!"
@@ -152,7 +152,7 @@ else
 fi
 
 # Check node name
-if echo "${STATUS_OUTPUT}" | grep -q "keelnode-test"; then
+if echo "${STATUS_OUTPUT}" | grep -q "Node Name.*keelnode-test"; then
     echo "✓ Node name is correct"
 else
     echo "!!! FAIL: Node name mismatch !!!"
