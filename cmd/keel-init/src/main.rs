@@ -545,12 +545,33 @@ fn spawn_kubelet() -> Option<Child> {
     };
 
     // Check if kubeconfig exists (set during bootstrap)
-    let kubeconfig_path = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+    let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+    let kubeconfig_path = "/var/lib/kubelet/kubeconfig"; // Permanent kubeconfig after CSR
     let mut args = vec!["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"];
 
-    if std::path::Path::new(kubeconfig_path).exists() {
-        info!(path = kubeconfig_path, "Using kubeconfig for kubelet");
-        args.push("--kubeconfig=/var/lib/keel/kubernetes/kubelet.kubeconfig");
+    // Bootstrap flow:
+    // 1. If bootstrap kubeconfig exists but permanent doesn't -> initial bootstrap
+    // 2. If permanent kubeconfig exists -> already joined, use permanent
+    // 3. If neither exists -> standalone mode
+    if std::path::Path::new(bootstrap_kubeconfig).exists() {
+        if !std::path::Path::new(kubeconfig_path).exists() {
+            // Initial bootstrap - kubelet will use bootstrap token to generate CSR
+            info!(
+                bootstrap_path = bootstrap_kubeconfig,
+                target_path = kubeconfig_path,
+                "Using bootstrap kubeconfig for initial cluster join"
+            );
+            args.push("--bootstrap-kubeconfig=/var/lib/keel/kubernetes/kubelet.kubeconfig");
+            args.push("--kubeconfig=/var/lib/kubelet/kubeconfig");
+        } else {
+            // Already bootstrapped - use permanent kubeconfig
+            info!(path = kubeconfig_path, "Using permanent kubeconfig");
+            args.push("--kubeconfig=/var/lib/kubelet/kubeconfig");
+        }
+    } else if std::path::Path::new(kubeconfig_path).exists() {
+        // Only permanent kubeconfig exists
+        info!(path = kubeconfig_path, "Using permanent kubeconfig");
+        args.push("--kubeconfig=/var/lib/kubelet/kubeconfig");
     } else {
         debug!("No kubeconfig found - kubelet will run in standalone mode");
     }
