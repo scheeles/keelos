@@ -14,8 +14,8 @@ serverTLSBootstrap: true
 
 # Authentication
 authentication:
-  x509:
-    clientCAFile: /var/lib/keel/kubernetes/ca.crt
+  # Note: clientCAFile is not set here because the CA cert is written during bootstrap
+  # The kubelet will use the CA from the kubeconfig instead
   anonymous:
     enabled: false  # Security: disable anonymous access
   webhook:
