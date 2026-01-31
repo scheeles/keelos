@@ -220,6 +220,125 @@ fn apply_network_config(config: &keel_config::network::NetworkConfig) {
     }
 }
 
+/// Apply static IP configuration to an interface
+/// This helper is used for regular interfaces, VLANs, and Bonds
+fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticConfig) {
+    // Add IPv4 address if present
+    if !cfg.ipv4_address.is_empty() {
+        match Command::new("/sbin/ip")
+            .args(["addr", "add", &cfg.ipv4_address, "dev", iface_name])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                info!(interface = %iface_name, ip = %cfg.ipv4_address, "Static IPv4 configured");
+            }
+            Ok(status) => {
+                warn!(interface = %iface_name, exit_code = ?status.code(), "Failed to set IPv4 address");
+            }
+            Err(e) => {
+                warn!(interface = %iface_name, error = %e, "Failed to set IPv4 address");
+            }
+        }
+
+        // Set IPv4 gateway if present
+        if let Some(ref gateway) = cfg.gateway {
+            match Command::new("/sbin/ip")
+                .args([
+                    "route", "add", "default", "via", gateway, "dev", iface_name,
+                ])
+                .status()
+            {
+                Ok(status) if status.success() => {
+                    debug!(interface = %iface_name, gateway = %gateway, "IPv4 default route configured");
+                }
+                Ok(status) => {
+                    warn!(exit_code = ?status.code(), "Failed to set IPv4 default route");
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to set IPv4 default route");
+                }
+            }
+        }
+    }
+
+    // Add IPv6 addresses
+    for ipv6_addr in &cfg.ipv6_addresses {
+        match Command::new("/sbin/ip")
+            .args(["-6", "addr", "add", ipv6_addr, "dev", iface_name])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                info!(interface = %iface_name, ip = %ipv6_addr, "Static IPv6 configured");
+            }
+            Ok(status) => {
+                warn!(interface = %iface_name, exit_code = ?status.code(), "Failed to set IPv6 address");
+            }
+            Err(e) => {
+                warn!(interface = %iface_name, error = %e, "Failed to set IPv6 address");
+            }
+        }
+    }
+
+    // Set IPv6 gateway if present
+    if let Some(ref gateway6) = cfg.ipv6_gateway {
+        match Command::new("/sbin/ip")
+            .args([
+                "-6", "route", "add", "default", "via", gateway6, "dev", iface_name,
+            ])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                debug!(interface = %iface_name, gateway = %gateway6, "IPv6 default route configured");
+            }
+            Ok(status) => {
+                warn!(exit_code = ?status.code(), "Failed to set IPv6 default route");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to set IPv6 default route");
+            }
+        }
+    }
+
+    // Enable IPv6 SLAAC (auto-configuration) if requested
+    if cfg.ipv6_auto {
+        // Enable Router Advertisement acceptance
+        let accept_ra_path = format!("/proc/sys/net/ipv6/conf/{}/accept_ra", iface_name);
+        if let Err(e) = fs::write(&accept_ra_path, "1") {
+            warn!(interface = %iface_name, error = %e, "Failed to enable accept_ra");
+        } else {
+            debug!(interface = %iface_name, "Enabled IPv6 accept_ra");
+        }
+
+        // Enable IPv6 autoconfiguration
+        let autoconf_path = format!("/proc/sys/net/ipv6/conf/{}/autoconf", iface_name);
+        if let Err(e) = fs::write(&autoconf_path, "1") {
+            warn!(interface = %iface_name, error = %e, "Failed to enable autoconf");
+        } else {
+            debug!(interface = %iface_name, "Enabled IPv6 autoconf");
+        }
+
+        info!(interface = %iface_name, "IPv6 SLAAC enabled");
+    }
+
+    // Set MTU if non-default
+    if cfg.mtu != 1500 {
+        match Command::new("/sbin/ip")
+            .args(["link", "set", iface_name, "mtu", &cfg.mtu.to_string()])
+            .status()
+        {
+            Ok(status) if status.success() => {
+                debug!(interface = %iface_name, mtu = cfg.mtu, "MTU configured");
+            }
+            Ok(status) => {
+                warn!(exit_code = ?status.code(), "Failed to set MTU");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to set MTU");
+            }
+        }
+    }
+}
+
 /// Configure a single network interface
 fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
     use keel_config::network::InterfaceType;
@@ -250,118 +369,116 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
             debug!(interface = %iface.name, "DHCP configuration (client not implemented)");
         }
         InterfaceType::Static(cfg) => {
-            // Add IPv4 address if present
-            if !cfg.ipv4_address.is_empty() {
-                match Command::new("/sbin/ip")
-                    .args(["addr", "add", &cfg.ipv4_address, "dev", &iface.name])
-                    .status()
-                {
-                    Ok(status) if status.success() => {
-                        info!(interface = %iface.name, ip = %cfg.ipv4_address, "Static IPv4 configured");
-                    }
-                    Ok(status) => {
-                        warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to set IPv4 address");
-                    }
-                    Err(e) => {
-                        warn!(interface = %iface.name, error = %e, "Failed to set IPv4 address");
-                    }
-                }
+            apply_static_ip_config(&iface.name, cfg);
+        }
+        InterfaceType::Vlan(vlan_cfg) => {
+            info!(interface = %iface.name, vlan_id = vlan_cfg.vlan_id, parent = %vlan_cfg.parent, "Configuring VLAN");
 
-                // Set IPv4 gateway if present
-                if let Some(ref gateway) = cfg.gateway {
-                    match Command::new("/sbin/ip")
-                        .args([
-                            "route",
-                            "add",
-                            "default",
-                            "via",
-                            gateway,
-                            "dev",
-                            &iface.name,
-                        ])
+            // Create VLAN interface using ip link
+            match Command::new("/sbin/ip")
+                .args([
+                    "link", "add", "link", &vlan_cfg.parent,
+                    "name", &iface.name,
+                    "type", "vlan", "id", &vlan_cfg.vlan_id.to_string()
+                ])
+                .status()
+            {
+                Ok(status) if status.success() => {
+                    debug!(interface = %iface.name, "VLAN interface created");
+
+                    // Bring VLAN interface up
+                    if let Err(e) = Command::new("/sbin/ip")
+                        .args(["link", "set", &iface.name, "up"])
                         .status()
                     {
-                        Ok(status) if status.success() => {
-                            debug!(interface = %iface.name, gateway = %gateway, "IPv4 default route configured");
+                        warn!(interface = %iface.name, error = ?e, "Failed to bring up VLAN");
+                        return;
+                    }
+
+                    // Configure IP based on VLAN config type
+                    match &vlan_cfg.ip_config {
+                        keel_config::network::VlanIpConfig::Dhcp => {
+                            debug!(interface = %iface.name, "VLAN DHCP configuration (client not implemented)");
                         }
-                        Ok(status) => {
-                            warn!(exit_code = ?status.code(), "Failed to set IPv4 default route");
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Failed to set IPv4 default route");
+                        keel_config::network::VlanIpConfig::Static(cfg) => {
+                            apply_static_ip_config(&iface.name, cfg);
                         }
                     }
                 }
-            }
-
-            // Add IPv6 addresses
-            for ipv6_addr in &cfg.ipv6_addresses {
-                match Command::new("/sbin/ip")
-                    .args(["-6", "addr", "add", ipv6_addr, "dev", &iface.name])
-                    .status()
-                {
-                    Ok(status) if status.success() => {
-                        info!(interface = %iface.name, ip = %ipv6_addr, "Static IPv6 configured");
-                    }
-                    Ok(status) => {
-                        warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to set IPv6 address");
-                    }
-                    Err(e) => {
-                        warn!(interface = %iface.name, error = %e, "Failed to set IPv6 address");
-                    }
+                Ok(status) => {
+                    warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to create VLAN");
                 }
-            }
-
-            // Set IPv6 gateway if present
-            if let Some(ref gateway6) = cfg.ipv6_gateway {
-                match Command::new("/sbin/ip")
-                    .args([
-                        "-6",
-                        "route",
-                        "add",
-                        "default",
-                        "via",
-                        gateway6,
-                        "dev",
-                        &iface.name,
-                    ])
-                    .status()
-                {
-                    Ok(status) if status.success() => {
-                        debug!(interface = %iface.name, gateway = %gateway6, "IPv6 default route configured");
-                    }
-                    Ok(status) => {
-                        warn!(exit_code = ?status.code(), "Failed to set IPv6 default route");
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to set IPv6 default route");
-                    }
-                }
-            }
-
-            // Set MTU if non-default
-            if cfg.mtu != 1500 {
-                match Command::new("/sbin/ip")
-                    .args(["link", "set", &iface.name, "mtu", &cfg.mtu.to_string()])
-                    .status()
-                {
-                    Ok(status) if status.success() => {
-                        debug!(interface = %iface.name, mtu = cfg.mtu, "MTU configured");
-                    }
-                    Ok(status) => {
-                        warn!(exit_code = ?status.code(), "Failed to set MTU");
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "Failed to set MTU");
-                    }
+                Err(e) => {
+                    warn!(interface = %iface.name, error = %e, "Failed to create VLAN");
                 }
             }
         }
-        InterfaceType::Vlan(_) => {
-            warn!(interface = %iface.name, "VLAN configuration not yet implemented");
-        }
-        InterfaceType::Bond(_) => {
-            warn!(interface = %iface.name, "Bond configuration not yet implemented");
+        InterfaceType::Bond(bond_cfg) => {
+            info!(interface = %iface.name, mode = %bond_cfg.mode.as_str(), "Configuring Bond");
+
+            // Create bond interface
+            match Command::new("/sbin/ip")
+                .args(["link", "add", &iface.name, "type", "bond", "mode", bond_cfg.mode.as_str()])
+                .status()
+            {
+                Ok(status) if status.success() => {
+                    debug!(interface = %iface.name, "Bond interface created");
+
+                    // Bring bond interface up
+                    if let Err(e) = Command::new("/sbin/ip")
+                        .args(["link", "set", &iface.name, "up"])
+                        .status()
+                    {
+                        warn!(interface = %iface.name, error = ?e, "Failed to bring up bond");
+                        return;
+                    }
+
+                    // Enslave member interfaces
+                    for slave in &bond_cfg.slaves {
+                        // Bring slave down first
+                        let _ = Command::new("/sbin/ip")
+                            .args(["link", "set", slave, "down"])
+                            .status();
+
+                        // Add to bond
+                        match Command::new("/sbin/ip")
+                            .args(["link", "set", slave, "master", &iface.name])
+                            .status()
+                        {
+                            Ok(status) if status.success() => {
+                                debug!(interface = %iface.name, slave = %slave, "Enslaved interface to bond");
+
+                                // Bring slave back up
+                                let _ = Command::new("/sbin/ip")
+                                    .args(["link", "set", slave, "up"])
+                                    .status();
+                            }
+                            Ok(status) => {
+                                warn!(slave = %slave, exit_code = ?status.code(), "Failed to enslave interface");
+                            }
+                            Err(e) => {
+                                warn!(slave = %slave, error = %e, "Failed to enslave interface");
+                            }
+                        }
+                    }
+
+                    // Configure IP based on bond config type
+                    match &bond_cfg.ip_config {
+                        keel_config::network::BondIpConfig::Dhcp => {
+                            debug!(interface = %iface.name, "Bond DHCP configuration (client not implemented)");
+                        }
+                        keel_config::network::BondIpConfig::Static(cfg) => {
+                            apply_static_ip_config(&iface.name, cfg);
+                        }
+                    }
+                }
+                Ok(status) => {
+                    warn!(interface = %iface.name, exit_code = ?status.code(), "Failed to create bond");
+                }
+                Err(e) => {
+                    warn!(interface = %iface.name, error = %e, "Failed to create bond");
+                }
+            }
         }
     }
 }
