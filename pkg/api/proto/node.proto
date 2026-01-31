@@ -41,6 +41,15 @@ service NodeService {
   
   // Get Kubernetes bootstrap status
   rpc GetBootstrapStatus (GetBootstrapStatusRequest) returns (GetBootstrapStatusResponse);
+  
+  // Configure network interfaces and DNS
+  rpc ConfigureNetwork (ConfigureNetworkRequest) returns (ConfigureNetworkResponse);
+  
+  // Get current network configuration
+  rpc GetNetworkConfig (GetNetworkConfigRequest) returns (GetNetworkConfigResponse);
+  
+  // Get runtime network status (link state, IP addresses, statistics)
+  rpc GetNetworkStatus (GetNetworkStatusRequest) returns (GetNetworkStatusResponse);
 }
 
 message InstallUpdateRequest {
@@ -256,6 +265,7 @@ message RotateCertificateRequest {
   bool force = 1;
 }
 
+
 message RotateCertificateResponse {
   bool success = 1;
   string message = 2;
@@ -263,4 +273,187 @@ message RotateCertificateResponse {
   string cert_path = 3;
   // Certificate expiry time (RFC3339)
   string expires_at = 4;
+}
+
+// Network Management messages
+
+message ConfigureNetworkRequest {
+  // Network interface configurations
+  repeated NetworkInterface interfaces = 1;
+  
+  // DNS configuration
+  DNSConfig dns = 2;
+  
+  // Custom routes
+  repeated NetworkRoute routes = 3;
+  
+  // Optional: Reboot after applying configuration
+  bool auto_reboot = 4;
+}
+
+message ConfigureNetworkResponse {
+  bool success = 1;
+  string message = 2;
+  // Whether reboot is required for changes to take effect
+  bool reboot_required = 3;
+}
+
+message GetNetworkConfigRequest {}
+
+message GetNetworkConfigResponse {
+  repeated NetworkInterface interfaces = 1;
+  DNSConfig dns = 2;
+  repeated NetworkRoute routes = 3;
+}
+
+message GetNetworkStatusRequest {}
+
+message GetNetworkStatusResponse {
+  repeated InterfaceStatus interfaces = 1;
+}
+
+message NetworkInterface {
+  // Interface name (e.g., "eth0", "bond0", "eth0.100")
+  string name = 1;
+  
+  // Configuration type
+  oneof config {
+    DHCPConfig dhcp = 2;
+    StaticConfig static = 3;
+    VLANConfig vlan = 4;
+    BondConfig bond = 5;
+  }
+}
+
+message DHCPConfig {
+  // Whether to use DHCP for this interface
+  bool enabled = 1;
+}
+
+message StaticConfig {
+  // IPv4 address with CIDR notation (e.g., "192.168.1.100/24")
+  string ipv4_address = 1;
+  
+  // IPv4 gateway IP address
+  string gateway = 2;
+  
+  // MTU (optional, default 1500)
+  uint32 mtu = 3;
+  
+  // IPv6 addresses with CIDR notation (e.g., "2001:db8::1/64")
+  // Multiple IPv6 addresses can be assigned to a single interface
+  repeated string ipv6_addresses = 4;
+  
+  // IPv6 gateway IP address
+  string ipv6_gateway = 5;
+  
+  // Enable IPv6 auto-configuration (SLAAC)
+  bool ipv6_auto = 6;
+}
+
+message VLANConfig {
+  // Parent interface name
+  string parent = 1;
+  
+  // VLAN ID (1-4094)
+  uint32 vlan_id = 2;
+  
+  // IP configuration for the VLAN interface
+  oneof ip_config {
+    DHCPConfig dhcp = 3;
+    StaticConfig static = 4;
+  }
+}
+
+message BondConfig {
+  // Bonding mode ("802.3ad", "active-backup", "balance-rr")
+  string mode = 1;
+  
+  // Slave interfaces
+  repeated string slaves = 2;
+  
+  // IP configuration for the bond interface
+  oneof ip_config {
+    DHCPConfig dhcp = 3;
+    StaticConfig static = 4;
+  }
+}
+
+message DNSConfig {
+  // DNS nameserver IP addresses
+  repeated string nameservers = 1;
+  
+  // DNS search domains
+  repeated string search_domains = 2;
+}
+
+message NetworkRoute {
+  // Destination network in CIDR notation (e.g., "10.0.0.0/8")
+  string destination = 1;
+  
+  // Gateway IP address
+  string gateway = 2;
+  
+  // Optional: Metric/priority
+  uint32 metric = 3;
+}
+
+message InterfaceStatus {
+  // Interface name
+  string name = 1;
+  
+  // Link state (up, down, unknown)
+  string state = 2;
+  
+  // IPv4 addresses
+  repeated string ipv4_addresses = 3;
+  
+  // MAC address
+  string mac_address = 4;
+  
+  // MTU
+  uint32 mtu = 5;
+  
+  // Statistics
+  InterfaceStatistics statistics = 6;
+  
+  // IPv6 addresses
+  repeated string ipv6_addresses = 7;
+  
+  // Detailed IPv6 address information
+  repeated IPv6AddressInfo ipv6_address_info = 8;
+}
+
+message IPv6AddressInfo {
+  // IPv6 address
+  string address = 1;
+  
+  // Prefix length
+  uint32 prefix_len = 2;
+  
+  // Scope (e.g., "global", "link")
+  string scope = 3;
+  
+  // Flags (e.g., "permanent", "dynamic")
+  repeated string flags = 4;
+}
+
+message InterfaceStatistics {
+  // Received bytes
+  uint64 rx_bytes = 1;
+  
+  // Transmitted bytes
+  uint64 tx_bytes = 2;
+  
+  // Received packets
+  uint64 rx_packets = 3;
+  
+  // Transmitted packets
+  uint64 tx_packets = 4;
+  
+  // Receive errors
+  uint64 rx_errors = 5;
+  
+  // Transmit errors
+  uint64 tx_errors = 6;
 }
