@@ -39,10 +39,6 @@ networking:
   apiServerPort: 6443
 nodes:
 - role: control-plane
-  extraPortMappings:
-  - containerPort: 6443
-    hostPort: 6443
-    protocol: TCP
   kubeadmConfigPatches:
   - |
     kind: ClusterConfiguration
