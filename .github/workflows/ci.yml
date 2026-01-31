@@ -259,8 +259,8 @@ jobs:
       - name: Install jq
         run: sudo apt-get install -y jq
 
-      - name: Build osctl
-        run: cargo build --bin osctl
+      - name: Make osctl executable
+        run: chmod +x build/osctl
 
       - name: Run Bootstrap Test
         run: |
