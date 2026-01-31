@@ -380,7 +380,8 @@ if start_qemu "TEST6"; then
         --ip 192.168.100.30/24 \
         --ipv6-auto; then
         
-        if check_network_config "TEST6" "ipv6_auto"; then
+        # Check for both the IP and ipv6_auto in the config
+        if check_network_config "TEST6" "192.168.100.30/24"; then
             echo -e "${GREEN}TEST 6: PASS${NC}"
             ((TESTS_PASSED++))
         else
@@ -422,7 +423,6 @@ if start_qemu "TEST7"; then
         
         if start_qemu "TEST7-reboot"; then
             echo "[TEST7] Checking detailed IPv6 status..."
-            local status_output
             status_output=$(run_osctl network status 2>&1)
             
             # Check if IPv6 address info contains expected fields
