@@ -39,7 +39,7 @@ async-trait = "0.1"
 # Delta update support
 bsdiff = { workspace = true }
 tempfile = "3.0"
-hostname = "0.3"
+hostname = "0.4"
 
 # Kubernetes integration for operational certificates
 kube = { version = "0.87", features = ["runtime", "derive", "client", "rustls-tls"] }
