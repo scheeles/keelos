@@ -365,6 +365,168 @@ echo -e "${YELLOW}TEST 5: SKIPPED (user requested)${NC}"
 #     ((TESTS_FAILED++))
 # fi
 
+# =============================================================================
+# TEST 6: IPv6 SLAAC Auto-configuration
+# =============================================================================
+echo ""
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}TEST 6: IPv6 SLAAC Auto-configuration${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+if start_qemu "TEST6"; then
+    echo "[TEST6] Configuring IPv6 SLAAC..."
+    if run_osctl network config set \
+        --interface eth0 \
+        --ip 192.168.100.30/24 \
+        --ipv6-auto; then
+        
+        if check_network_config "TEST6" "ipv6_auto"; then
+            echo -e "${GREEN}TEST 6: PASS${NC}"
+            ((TESTS_PASSED++))
+        else
+            echo -e "${RED}TEST 6: FAIL (config verification)${NC}"
+            ((TESTS_FAILED++))
+        fi
+    else
+        echo -e "${RED}TEST 6: FAIL (config set)${NC}"
+        ((TESTS_FAILED++))
+    fi
+    stop_qemu "TEST6"
+else
+    echo -e "${RED}TEST 6: FAIL (boot failed)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# =============================================================================
+# TEST 7: IPv6 Detailed Status Reporting
+# =============================================================================
+echo ""
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}TEST 7: IPv6 Detailed Status${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+if start_qemu "TEST7"; then
+    echo "[TEST7] Configuring static IPv6 and checking detailed status..."
+    if run_osctl network config set \
+        --interface eth0 \
+        --ipv6 2001:db8::100/64; then
+        
+        # Reboot to apply configuration
+        echo "[TEST7] Rebooting to apply configuration..."
+        run_osctl reboot --reason "test7-ipv6-status" || true
+        sleep 5
+        
+        # Restart QEMU for this test
+        stop_qemu "TEST7"
+        sleep 2
+        
+        if start_qemu "TEST7-reboot"; then
+            echo "[TEST7] Checking detailed IPv6 status..."
+            local status_output
+            status_output=$(run_osctl network status 2>&1)
+            
+            # Check if IPv6 address info contains expected fields
+            # Note: Actual verification would require jq to parse JSON properly
+            if echo "$status_output" | grep -q "2001:db8::100"; then
+                echo -e "${GREEN}TEST 7: PASS (IPv6 address found in status)${NC}"
+                ((TESTS_PASSED++))
+            else
+                echo -e "${RED}TEST 7: FAIL (IPv6 address not in status)${NC}"
+                echo "Status output: $status_output"
+                ((TESTS_FAILED++))
+            fi
+            stop_qemu "TEST7-reboot"
+        else
+            echo -e "${RED}TEST 7: FAIL (reboot failed)${NC}"
+            ((TESTS_FAILED++))
+        fi
+    else
+        echo -e "${RED}TEST 7: FAIL (config set)${NC}"
+        ((TESTS_FAILED++))
+        stop_qemu "TEST7"
+    fi
+else
+    echo -e "${RED}TEST 7: FAIL (boot failed)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# =============================================================================
+# TEST 8: VLAN with IPv6
+# =============================================================================
+echo ""
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}TEST 8: VLAN with IPv6${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+echo -e "${YELLOW}TEST 8: SKIPPED (requires VLAN-capable QEMU network setup)${NC}"
+echo "[TEST8] Note: This test requires a VLAN-aware network configuration in QEMU"
+echo "[TEST8] For manual testing, use: osctl network config set --interface eth0.100 --vlan 100 --parent eth0 --ipv6 2001:db8:100::1/64"
+
+# Uncomment when QEMU has VLAN support configured:
+# if start_qemu "TEST8"; then
+#     echo "[TEST8] Configuring VLAN with IPv6..."
+#     if run_osctl network config set \
+#         --interface eth0.100 \
+#         --vlan 100 \
+#         --parent eth0 \
+#         --ipv6 2001:db8:100::1/64 \
+#         --ipv6-auto; then
+#         
+#         if check_network_config "TEST8" "2001:db8:100::1/64"; then
+#             echo -e "${GREEN}TEST 8: PASS${NC}"
+#             ((TESTS_PASSED++))
+#         else
+#             echo -e "${RED}TEST 8: FAIL (config verification)${NC}"
+#             ((TESTS_FAILED++))
+#         fi
+#     else
+#         echo -e "${RED}TEST 8: FAIL (config set)${NC}"
+#         ((TESTS_FAILED++))
+#     fi
+#     stop_qemu "TEST8"
+# else
+#     echo -e "${RED}TEST 8: FAIL (boot failed)${NC}"
+#     ((TESTS_FAILED++))
+# fi
+
+# =============================================================================
+# TEST 9: Bond with IPv6
+# =============================================================================
+echo ""
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}TEST 9: Bond with IPv6${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+echo -e "${YELLOW}TEST 9: SKIPPED (requires multi-NIC QEMU setup)${NC}"
+echo "[TEST9] Note: This test requires QEMU with multiple network interfaces"
+echo "[TEST9] For manual testing, use: osctl network config set --interface bond0 --bond active-backup --slaves eth0,eth1 --ipv6 2001:db8:200::1/64"
+
+# Uncomment when QEMU has multiple NICs configured:
+# if start_qemu "TEST9"; then
+#     echo "[TEST9] Configuring Bond with IPv6..."
+#     if run_osctl network config set \
+#         --interface bond0 \
+#         --bond active-backup \
+#         --slaves eth0,eth1 \
+#         --ipv6 2001:db8:200::1/64; then
+#         
+#         if check_network_config "TEST9" "2001:db8:200::1/64"; then
+#             echo -e "${GREEN}TEST 9: PASS${NC}"
+#             ((TESTS_PASSED++))
+#         else
+#             echo -e "${RED}TEST 9: FAIL (config verification)${NC}"
+#             ((TESTS_FAILED++))
+#         fi
+#     else
+#         echo -e "${RED}TEST 9: FAIL (config set)${NC}"
+#         ((TESTS_FAILED++))
+#     fi
+#     stop_qemu "TEST9"
+# else
+#     echo -e "${RED}TEST 9: FAIL (boot failed)${NC}"
+#     ((TESTS_FAILED++))
+# fi
+
 
 # =============================================================================
 # SUMMARY
