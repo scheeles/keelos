@@ -652,10 +652,11 @@ fn supervise_services() -> Result<(), InitError> {
             true
         } else if std::path::Path::new(bootstrap_kubeconfig).exists()
             && !std::path::Path::new(permanent_kubeconfig).exists()
-            && kubelet.is_some()
         {
             // Bootstrap kubeconfig exists but permanent doesn't - need to bootstrap
             // Track if we've already restarted for this kubeconfig
+            // Note: We don't check kubelet.is_some() because kubelet might have exited
+            // before this check runs. spawn_kubelet() handles both starting and restarting.
             static BOOTSTRAPPED: std::sync::atomic::AtomicBool =
                 std::sync::atomic::AtomicBool::new(false);
 
