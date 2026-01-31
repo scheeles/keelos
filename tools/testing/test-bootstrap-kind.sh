@@ -159,7 +159,37 @@ else
     exit 1
 fi
 
+# Debug: Check for CSRs from the node
+echo ""
+echo "Checking for Certificate Signing Requests..."
+kubectl get csr -o wide || true
+CSR_COUNT=$(kubectl get csr 2>/dev/null | grep -c keelnode || echo "0")
+echo "CSRs found: ${CSR_COUNT}"
+
+# Debug: Check if kubelet is actually running in QEMU
+echo ""
+echo "Checking QEMU logs for kubelet activity..."
+if grep -q "Starting kubelet" "${LOG_FILE}" 2>/dev/null; then
+    echo "✓ Kubelet startup detected in logs"
+    # Show last few kubelet-related log lines
+    echo "Recent kubelet logs:"
+    grep "kubelet" "${LOG_FILE}" 2>/dev/null | tail -10 || true
+else
+    echo "⚠ No kubelet startup messages found in logs"
+fi
+
+# Debug: Verify bootstrap config was applied
+echo ""
+echo "Verifying bootstrap configuration in guest..."
+VERIFY_OUTPUT=$("${OSCTL}" --endpoint "${ENDPOINT}" bootstrap-status 2>&1)
+if echo "${VERIFY_OUTPUT}" | grep -q "ca.crt"; then
+    echo "✓ CA certificate path detected in config"
+else
+    echo "⚠ CA certificate may not be configured"
+fi
+
 # Wait for node to appear in cluster (optional check)
+echo ""
 echo "Checking if node appears in cluster (waiting up to 90s)..."
 NODE_TIMEOUT=90
 START_TIME=$(date +%s)
