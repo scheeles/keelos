@@ -243,9 +243,7 @@ fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticCo
         // Set IPv4 gateway if present
         if let Some(ref gateway) = cfg.gateway {
             match Command::new("/sbin/ip")
-                .args([
-                    "route", "add", "default", "via", gateway, "dev", iface_name,
-                ])
+                .args(["route", "add", "default", "via", gateway, "dev", iface_name])
                 .status()
             {
                 Ok(status) if status.success() => {
@@ -377,9 +375,16 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
             // Create VLAN interface using ip link
             match Command::new("/sbin/ip")
                 .args([
-                    "link", "add", "link", &vlan_cfg.parent,
-                    "name", &iface.name,
-                    "type", "vlan", "id", &vlan_cfg.vlan_id.to_string()
+                    "link",
+                    "add",
+                    "link",
+                    &vlan_cfg.parent,
+                    "name",
+                    &iface.name,
+                    "type",
+                    "vlan",
+                    "id",
+                    &vlan_cfg.vlan_id.to_string(),
                 ])
                 .status()
             {
@@ -418,7 +423,15 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
 
             // Create bond interface
             match Command::new("/sbin/ip")
-                .args(["link", "add", &iface.name, "type", "bond", "mode", bond_cfg.mode.as_str()])
+                .args([
+                    "link",
+                    "add",
+                    &iface.name,
+                    "type",
+                    "bond",
+                    "mode",
+                    bond_cfg.mode.as_str(),
+                ])
                 .status()
             {
                 Ok(status) if status.success() => {

@@ -442,7 +442,7 @@ pub async fn get_network_status(
 /// Parse a single line from `ip -6 addr show` output
 /// Example: "    inet6 2001:db8::1/64 scope global dynamic"
 /// Example: "    inet6 fe80::a00:27ff:fe4e:66a1/64 scope link"
-fn parse_ipv6_address_line(line: &str) -> Option<Ipv6AddressInfo> {
+fn parse_ipv6_address_line(line: &str) -> Option<IPv6AddressInfo> {
     let trimmed = line.trim();
     if !trimmed.starts_with("inet6 ") {
         return None;
@@ -457,9 +457,7 @@ fn parse_ipv6_address_line(line: &str) -> Option<Ipv6AddressInfo> {
     let addr_with_prefix = parts[1];
     let (address, prefix_len) = if let Some(pos) = addr_with_prefix.find('/') {
         let addr = &addr_with_prefix[..pos];
-        let prefix = addr_with_prefix[pos + 1..]
-            .parse::<u32>()
-            .unwrap_or(128);
+        let prefix = addr_with_prefix[pos + 1..].parse::<u32>().unwrap_or(128);
         (addr.to_string(), prefix)
     } else {
         (addr_with_prefix.to_string(), 128)
@@ -484,7 +482,7 @@ fn parse_ipv6_address_line(line: &str) -> Option<Ipv6AddressInfo> {
         }
     }
 
-    Some(Ipv6AddressInfo {
+    Some(IPv6AddressInfo {
         address,
         prefix_len,
         scope,
