@@ -10,9 +10,15 @@ echo ">>> Starting CI Build Process..."
 # BUILD PHASE ONLY
 # =============================================================================
 
-# 1. Build Rust Binaries (Init, Agent, API)
+# 1. Build Rust Binaries (Init, Agent, API, osctl)
 echo ">>> Building Rust components (musl)..."
 cargo build --release --target x86_64-unknown-linux-musl --workspace
+
+# Copy osctl binary to build directory for test jobs
+echo ">>> Copying osctl to build directory..."
+mkdir -p /keelos/build
+cp /keelos/target/x86_64-unknown-linux-musl/release/osctl /keelos/build/osctl
+chmod +x /keelos/build/osctl
 
 # 2. Build Kernel (skipped if cached)
 echo ">>> Building Kernel..."

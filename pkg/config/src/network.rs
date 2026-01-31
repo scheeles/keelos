@@ -100,6 +100,10 @@ pub struct StaticConfig {
     /// IPv6 gateway IP address
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipv6_gateway: Option<String>,
+
+    /// Enable IPv6 auto-configuration (SLAAC)
+    #[serde(default)]
+    pub ipv6_auto: bool,
 }
 
 fn default_mtu() -> u32 {
@@ -311,9 +315,10 @@ impl StaticConfig {
     /// Validate static IP configuration
     fn validate(&self) -> Result<(), NetworkConfigError> {
         // Ensure at least one IP address is configured
-        if self.ipv4_address.is_empty() && self.ipv6_addresses.is_empty() {
+        // Ensure at least one IP address is configured or auto-config is enabled
+        if self.ipv4_address.is_empty() && self.ipv6_addresses.is_empty() && !self.ipv6_auto {
             return Err(NetworkConfigError::Validation(
-                "Static configuration must have at least one IP address (IPv4 or IPv6)".to_string(),
+                "Static configuration must have at least one IP address (IPv4 or IPv6) or IPv6 auto-config enabled".to_string(),
             ));
         }
 
@@ -456,6 +461,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec![],
             ipv6_gateway: None,
+            ipv6_auto: false,
         };
         assert!(valid_ipv4.validate().is_ok());
 
@@ -466,6 +472,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec!["2001:db8::1/64".to_string()],
             ipv6_gateway: Some("2001:db8::ff".to_string()),
+            ipv6_auto: false,
         };
         assert!(valid_ipv6.validate().is_ok());
 
@@ -476,6 +483,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec!["2001:db8::1/64".to_string(), "fd00::1/64".to_string()],
             ipv6_gateway: Some("2001:db8::ff".to_string()),
+            ipv6_auto: false,
         };
         assert!(valid_dual.validate().is_ok());
 
@@ -486,6 +494,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec![],
             ipv6_gateway: None,
+            ipv6_auto: false,
         };
         assert!(no_ips.validate().is_err());
 
@@ -496,6 +505,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec![],
             ipv6_gateway: None,
+            ipv6_auto: false,
         };
         assert!(invalid_cidr.validate().is_err());
 
@@ -506,6 +516,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec![],
             ipv6_gateway: None,
+            ipv6_auto: false,
         };
         assert!(invalid_gateway.validate().is_err());
 
@@ -516,6 +527,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec!["gggg::1/64".to_string()], // Invalid IPv6
             ipv6_gateway: None,
+            ipv6_auto: false,
         };
         assert!(invalid_ipv6_cidr.validate().is_err());
 
@@ -526,6 +538,7 @@ mod tests {
             mtu: 1500,
             ipv6_addresses: vec!["2001:db8::1/64".to_string()],
             ipv6_gateway: Some("not-an-ipv6".to_string()),
+            ipv6_auto: false,
         };
         assert!(invalid_ipv6_gateway.validate().is_err());
     }
@@ -573,6 +586,7 @@ mod tests {
                     mtu: 1500,
                     ipv6_addresses: vec!["2001:db8::100/64".to_string()],
                     ipv6_gateway: Some("2001:db8::1".to_string()),
+                    ipv6_auto: false,
                 }),
             }],
             dns: Some(DnsConfig {

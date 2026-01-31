@@ -127,6 +127,9 @@ enum NetworkConfigAction {
         /// IPv6 gateway IP address
         #[arg(long)]
         ipv6_gateway: Option<String>,
+        /// Enable IPv6 auto-configuration (SLAAC)
+        #[arg(long)]
+        ipv6_auto: bool,
         /// MTU (default: 1500)
         #[arg(long)]
         mtu: Option<u32>,
@@ -435,208 +438,215 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
         }
-        Commands::Network { action } => match action {
-            NetworkAction::Config { action } => match action {
-                NetworkConfigAction::Set {
-                    interface,
-                    dhcp,
-                    ip,
-                    gateway,
-                    ipv6,
-                    ipv6_gateway,
-                    mtu,
-                    auto_reboot,
-                } => {
-                    // Build network interface configuration
-                    let iface_config = if *dhcp {
-                        Some(keel_api::node::network_interface::Config::Dhcp(
-                            DhcpConfig { enabled: true },
-                        ))
-                    } else if ip.is_some() || !ipv6.is_empty() {
-                        Some(keel_api::node::network_interface::Config::Static(
-                            StaticConfig {
-                                ipv4_address: ip.clone().unwrap_or_default(),
-                                gateway: gateway.clone().unwrap_or_default(),
-                                mtu: mtu.unwrap_or(1500),
-                                ipv6_addresses: ipv6.clone(),
-                                ipv6_gateway: ipv6_gateway.clone().unwrap_or_default(),
-                            },
-                        ))
-                    } else {
-                        eprintln!("Error: Either --dhcp, --ip, or --ipv6 must be specified");
-                        std::process::exit(1);
-                    };
+        Commands::Network { action } => {
+            match action {
+                NetworkAction::Config { action } => match action {
+                    NetworkConfigAction::Set {
+                        interface,
+                        dhcp,
+                        ip,
+                        gateway,
+                        ipv6,
+                        ipv6_gateway,
+                        ipv6_auto,
+                        mtu,
+                        auto_reboot,
+                    } => {
+                        // Build network interface configuration
+                        let iface_config = if *dhcp {
+                            Some(keel_api::node::network_interface::Config::Dhcp(
+                                DhcpConfig { enabled: true },
+                            ))
+                        } else if ip.is_some() || !ipv6.is_empty() || *ipv6_auto {
+                            Some(keel_api::node::network_interface::Config::Static(
+                                StaticConfig {
+                                    ipv4_address: ip.clone().unwrap_or_default(),
+                                    gateway: gateway.clone().unwrap_or_default(),
+                                    mtu: mtu.unwrap_or(1500),
+                                    ipv6_addresses: ipv6.clone(),
+                                    ipv6_gateway: ipv6_gateway.clone().unwrap_or_default(),
+                                    ipv6_auto: *ipv6_auto,
+                                },
+                            ))
+                        } else {
+                            eprintln!("Error: Either --dhcp, --ip, --ipv6, or --ipv6-auto must be specified");
+                            std::process::exit(1);
+                        };
 
-                    let request = tonic::Request::new(ConfigureNetworkRequest {
-                        interfaces: vec![NetworkInterface {
-                            name: interface.clone(),
-                            config: iface_config,
-                        }],
-                        dns: None,
-                        routes: vec![],
-                        auto_reboot: *auto_reboot,
-                    });
+                        let request = tonic::Request::new(ConfigureNetworkRequest {
+                            interfaces: vec![NetworkInterface {
+                                name: interface.clone(),
+                                config: iface_config,
+                            }],
+                            dns: None,
+                            routes: vec![],
+                            auto_reboot: *auto_reboot,
+                        });
 
-                    println!("🌐 Configuring network interface '{}'...", interface);
-                    let response = client.configure_network(request).await?;
-                    let result = response.into_inner();
+                        println!("🌐 Configuring network interface '{}'...", interface);
+                        let response = client.configure_network(request).await?;
+                        let result = response.into_inner();
 
-                    if result.success {
-                        println!("✅ {}", result.message);
-                        if result.reboot_required && !auto_reboot {
-                            println!("\n⚠️  Reboot required for changes to take effect");
-                            println!("   Run: osctl reboot");
+                        if result.success {
+                            println!("✅ {}", result.message);
+                            if result.reboot_required && !auto_reboot {
+                                println!("\n⚠️  Reboot required for changes to take effect");
+                                println!("   Run: osctl reboot");
+                            }
+                        } else {
+                            eprintln!("❌ Configuration failed: {}", result.message);
+                            std::process::exit(1);
                         }
-                    } else {
-                        eprintln!("❌ Configuration failed: {}", result.message);
-                        std::process::exit(1);
                     }
-                }
-                NetworkConfigAction::Show => {
-                    let request = tonic::Request::new(GetNetworkConfigRequest {});
-                    let response = client.get_network_config(request).await?;
-                    let config = response.into_inner();
+                    NetworkConfigAction::Show => {
+                        let request = tonic::Request::new(GetNetworkConfigRequest {});
+                        let response = client.get_network_config(request).await?;
+                        let config = response.into_inner();
 
-                    if config.interfaces.is_empty() {
-                        println!("No network configuration found (using DHCP fallback)");
-                    } else {
-                        println!("\n📡 Network Configuration:\n");
-                        for iface in config.interfaces {
-                            println!("Interface: {}", iface.name);
-                            if let Some(cfg) = iface.config {
-                                match cfg {
-                                    keel_api::node::network_interface::Config::Dhcp(_) => {
-                                        println!("  Type: DHCP");
-                                    }
-                                    keel_api::node::network_interface::Config::Static(s) => {
-                                        println!("  Type: Static");
-                                        if !s.ipv4_address.is_empty() {
-                                            println!("  IPv4: {}", s.ipv4_address);
-                                            if !s.gateway.is_empty() {
-                                                println!("  IPv4 Gateway: {}", s.gateway);
-                                            }
+                        if config.interfaces.is_empty()
+                            && config.dns.is_none()
+                            && config.routes.is_empty()
+                        {
+                            println!("No network configuration found (using DHCP fallback)");
+                        } else {
+                            println!("\n📡 Network Configuration:\n");
+                            for iface in config.interfaces {
+                                println!("Interface: {}", iface.name);
+                                if let Some(cfg) = iface.config {
+                                    match cfg {
+                                        keel_api::node::network_interface::Config::Dhcp(_) => {
+                                            println!("  Type: DHCP");
                                         }
-                                        if !s.ipv6_addresses.is_empty() {
-                                            println!("  IPv6: {}", s.ipv6_addresses.join(", "));
-                                            if !s.ipv6_gateway.is_empty() {
-                                                println!("  IPv6 Gateway: {}", s.ipv6_gateway);
+                                        keel_api::node::network_interface::Config::Static(s) => {
+                                            println!("  Type: Static");
+                                            if !s.ipv4_address.is_empty() {
+                                                println!("  IPv4: {}", s.ipv4_address);
+                                                if !s.gateway.is_empty() {
+                                                    println!("  IPv4 Gateway: {}", s.gateway);
+                                                }
                                             }
+                                            if !s.ipv6_addresses.is_empty() {
+                                                println!("  IPv6: {}", s.ipv6_addresses.join(", "));
+                                                if !s.ipv6_gateway.is_empty() {
+                                                    println!("  IPv6 Gateway: {}", s.ipv6_gateway);
+                                                }
+                                            }
+                                            println!("  MTU: {}", s.mtu);
                                         }
-                                        println!("  MTU: {}", s.mtu);
+                                        keel_api::node::network_interface::Config::Vlan(v) => {
+                                            println!("  Type: VLAN");
+                                            println!("  Parent: {}", v.parent);
+                                            println!("  VLAN ID: {}", v.vlan_id);
+                                        }
+                                        keel_api::node::network_interface::Config::Bond(b) => {
+                                            println!("  Type: Bond");
+                                            println!("  Mode: {}", b.mode);
+                                            println!("  Slaves: {}", b.slaves.join(", "));
+                                        }
                                     }
-                                    keel_api::node::network_interface::Config::Vlan(v) => {
-                                        println!("  Type: VLAN");
-                                        println!("  Parent: {}", v.parent);
-                                        println!("  VLAN ID: {}", v.vlan_id);
-                                    }
-                                    keel_api::node::network_interface::Config::Bond(b) => {
-                                        println!("  Type: Bond");
-                                        println!("  Mode: {}", b.mode);
-                                        println!("  Slaves: {}", b.slaves.join(", "));
-                                    }
-                                }
-                            }
-                            println!();
-                        }
-
-                        if let Some(dns) = config.dns {
-                            println!("DNS Configuration:");
-                            println!("  Nameservers: {}", dns.nameservers.join(", "));
-                            if !dns.search_domains.is_empty() {
-                                println!("  Search domains: {}", dns.search_domains.join(", "));
-                            }
-                            println!();
-                        }
-
-                        if !config.routes.is_empty() {
-                            println!("Custom Routes:");
-                            for route in config.routes {
-                                print!("  {} via {}", route.destination, route.gateway);
-                                if route.metric > 0 {
-                                    print!(" (metric: {})", route.metric);
                                 }
                                 println!();
                             }
+
+                            if let Some(dns) = config.dns {
+                                println!("DNS Configuration:");
+                                println!("  Nameservers: {}", dns.nameservers.join(", "));
+                                if !dns.search_domains.is_empty() {
+                                    println!("  Search domains: {}", dns.search_domains.join(", "));
+                                }
+                                println!();
+                            }
+
+                            if !config.routes.is_empty() {
+                                println!("Custom Routes:");
+                                for route in config.routes {
+                                    print!("  {} via {}", route.destination, route.gateway);
+                                    if route.metric > 0 {
+                                        print!(" (metric: {})", route.metric);
+                                    }
+                                    println!();
+                                }
+                            }
                         }
                     }
-                }
-            },
-            NetworkAction::Status => {
-                let request = tonic::Request::new(GetNetworkStatusRequest {});
-                let response = client.get_network_status(request).await?;
-                let status = response.into_inner();
+                },
+                NetworkAction::Status => {
+                    let request = tonic::Request::new(GetNetworkStatusRequest {});
+                    let response = client.get_network_status(request).await?;
+                    let status = response.into_inner();
 
-                if status.interfaces.is_empty() {
-                    println!("No network interfaces found");
-                } else {
-                    println!("\n🌐 Network Status:\n");
-                    for iface in status.interfaces {
-                        let state_icon = match iface.state.as_str() {
-                            "up" => "🟢",
-                            "down" => "🔴",
-                            _ => "⚪",
-                        };
-                        println!("{} {} ({})", state_icon, iface.name, iface.state);
-                        println!("  MAC: {}", iface.mac_address);
-                        println!("  MTU: {}", iface.mtu);
-
-                        if !iface.ipv4_addresses.is_empty() {
-                            println!("  IPv4: {}", iface.ipv4_addresses.join(", "));
-                        }
-
-                        if !iface.ipv6_addresses.is_empty() {
-                            println!("  IPv6: {}", iface.ipv6_addresses.join(", "));
-                        }
-
-                        if let Some(stats) = iface.statistics {
-                            let rx_mb = stats.rx_bytes as f64 / (1024.0 * 1024.0);
-                            let tx_mb = stats.tx_bytes as f64 / (1024.0 * 1024.0);
-                            println!(
-                                "  RX: {:.2} MB ({} packets, {} errors)",
-                                rx_mb, stats.rx_packets, stats.rx_errors
-                            );
-                            println!(
-                                "  TX: {:.2} MB ({} packets, {} errors)",
-                                tx_mb, stats.tx_packets, stats.tx_errors
-                            );
-                        }
-                        println!();
-                    }
-                }
-            }
-            NetworkAction::Dns { action } => match action {
-                DnsAction::Set {
-                    nameserver,
-                    search,
-                    auto_reboot,
-                } => {
-                    let request = tonic::Request::new(ConfigureNetworkRequest {
-                        interfaces: vec![],
-                        dns: Some(DnsConfig {
-                            nameservers: nameserver.clone(),
-                            search_domains: search.clone(),
-                        }),
-                        routes: vec![],
-                        auto_reboot: *auto_reboot,
-                    });
-
-                    println!("🌐 Configuring DNS...");
-                    let response = client.configure_network(request).await?;
-                    let result = response.into_inner();
-
-                    if result.success {
-                        println!("✅ {}", result.message);
-                        if result.reboot_required && !auto_reboot {
-                            println!("\n⚠️  Reboot required for changes to take effect");
-                            println!("   Run: osctl reboot");
-                        }
+                    if status.interfaces.is_empty() {
+                        println!("No network interfaces found");
                     } else {
-                        eprintln!("❌ Configuration failed: {}", result.message);
-                        std::process::exit(1);
+                        println!("\n🌐 Network Status:\n");
+                        for iface in status.interfaces {
+                            let state_icon = match iface.state.as_str() {
+                                "up" => "🟢",
+                                "down" => "🔴",
+                                _ => "⚪",
+                            };
+                            println!("{} {} ({})", state_icon, iface.name, iface.state);
+                            println!("  MAC: {}", iface.mac_address);
+                            println!("  MTU: {}", iface.mtu);
+
+                            if !iface.ipv4_addresses.is_empty() {
+                                println!("  IPv4: {}", iface.ipv4_addresses.join(", "));
+                            }
+
+                            if !iface.ipv6_addresses.is_empty() {
+                                println!("  IPv6: {}", iface.ipv6_addresses.join(", "));
+                            }
+
+                            if let Some(stats) = iface.statistics {
+                                let rx_mb = stats.rx_bytes as f64 / (1024.0 * 1024.0);
+                                let tx_mb = stats.tx_bytes as f64 / (1024.0 * 1024.0);
+                                println!(
+                                    "  RX: {:.2} MB ({} packets, {} errors)",
+                                    rx_mb, stats.rx_packets, stats.rx_errors
+                                );
+                                println!(
+                                    "  TX: {:.2} MB ({} packets, {} errors)",
+                                    tx_mb, stats.tx_packets, stats.tx_errors
+                                );
+                            }
+                            println!();
+                        }
                     }
                 }
-            },
-        },
+                NetworkAction::Dns { action } => match action {
+                    DnsAction::Set {
+                        nameserver,
+                        search,
+                        auto_reboot,
+                    } => {
+                        let request = tonic::Request::new(ConfigureNetworkRequest {
+                            interfaces: vec![],
+                            dns: Some(DnsConfig {
+                                nameservers: nameserver.clone(),
+                                search_domains: search.clone(),
+                            }),
+                            routes: vec![],
+                            auto_reboot: *auto_reboot,
+                        });
+
+                        println!("🌐 Configuring DNS...");
+                        let response = client.configure_network(request).await?;
+                        let result = response.into_inner();
+
+                        if result.success {
+                            println!("✅ {}", result.message);
+                            if result.reboot_required && !auto_reboot {
+                                println!("\n⚠️  Reboot required for changes to take effect");
+                                println!("   Run: osctl reboot");
+                            }
+                        } else {
+                            eprintln!("❌ Configuration failed: {}", result.message);
+                            std::process::exit(1);
+                        }
+                    }
+                },
+            }
+        }
     }
 
     Ok(())

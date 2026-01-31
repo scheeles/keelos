@@ -67,7 +67,8 @@ cp -L "${PROJECT_ROOT}/tools/builder/kubelet-config.yaml" "${INITRAMFS_DIR}/etc/
 
 echo ">>> Building keel-init..."
 # In a real scenario, this runs inside the docker container
-# cargo build --release --target x86_64-unknown-linux-musl --package keel-init
+echo "Running cargo build..."
+cargo build --release --target x86_64-unknown-linux-musl --package keel-init --package keel-agent --package osctl
 
 # Check if binary exists (assuming user ran build or we are mocking)
 if [ ! -f "${TARGET_DIR}/keel-init" ]; then
@@ -97,16 +98,10 @@ ln -sf busybox "${INITRAMFS_DIR}/bin/route"
 
 echo ">>> Copying iproute2 (for advanced networking)..."
 # iproute2 provides full-featured ip command for VLAN, bonding, etc.
-if [ -f "/usr/sbin/ip" ]; then
-    cp -L /usr/sbin/ip "${INITRAMFS_DIR}/sbin/ip"
-    echo "Copied iproute2 ip command"
-elif [ -f "/sbin/ip" ]; then
-    cp -L /sbin/ip "${INITRAMFS_DIR}/sbin/ip"
-    echo "Copied iproute2 ip command"
-else
-    echo "WARNING: iproute2 'ip' command not found, using busybox fallback"
-    ln -sf ../bin/busybox "${INITRAMFS_DIR}/sbin/ip"
-fi
+# However, copying the host binary often fails due to missing shared libraries.
+# Use BusyBox ip by default for reliability in this minimal environment.
+echo "Using BusyBox ip command"
+ln -sf ../bin/busybox "${INITRAMFS_DIR}/sbin/ip"
 
 echo ">>> Copying kernel modules for networking..."
 # Copy VLAN (802.1Q) and bonding kernel modules if available

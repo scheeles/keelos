@@ -40,6 +40,7 @@ pub async fn configure_network(
                     } else {
                         Some(static_cfg.ipv6_gateway)
                     },
+                    ipv6_auto: static_cfg.ipv6_auto,
                 })
             }
             Some(network_interface::Config::Vlan(vlan_cfg)) => {
@@ -63,6 +64,7 @@ pub async fn configure_network(
                                 } else {
                                     Some(s.ipv6_gateway)
                                 },
+                                ipv6_auto: s.ipv6_auto,
                             },
                         )
                     }
@@ -103,6 +105,7 @@ pub async fn configure_network(
                                 } else {
                                     Some(s.ipv6_gateway)
                                 },
+                                ipv6_auto: s.ipv6_auto,
                             },
                         )
                     }
@@ -214,6 +217,7 @@ pub async fn get_network_config(
                                 mtu: cfg.mtu,
                                 ipv6_addresses: cfg.ipv6_addresses,
                                 ipv6_gateway: cfg.ipv6_gateway.unwrap_or_default(),
+                                ipv6_auto: cfg.ipv6_auto,
                             }))
                         }
                         keel_config::network::InterfaceType::Vlan(cfg) => {
@@ -228,6 +232,7 @@ pub async fn get_network_config(
                                         mtu: s.mtu,
                                         ipv6_addresses: s.ipv6_addresses,
                                         ipv6_gateway: s.ipv6_gateway.unwrap_or_default(),
+                                        ipv6_auto: s.ipv6_auto,
                                     }))
                                 }
                             };
@@ -250,6 +255,7 @@ pub async fn get_network_config(
                                         mtu: s.mtu,
                                         ipv6_addresses: s.ipv6_addresses,
                                         ipv6_gateway: s.ipv6_gateway.unwrap_or_default(),
+                                        ipv6_auto: s.ipv6_auto,
                                     }))
                                 }
                             };
@@ -327,6 +333,7 @@ pub async fn get_network_status(
                     mtu: 0,
                     statistics: None,
                     ipv6_addresses: vec![],
+                    ipv6_address_info: vec![],
                 };
 
                 // Read operstate

@@ -150,6 +150,7 @@ jobs:
             build/initramfs.cpio.gz
             build/sda.img
             build/keelos.iso
+            build/osctl
           retention-days: 1
 
   # ============================================================================

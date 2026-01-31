@@ -212,25 +212,16 @@ impl ApiCheck {
 #[async_trait]
 impl HealthCheck for ApiCheck {
     async fn check(&self) -> HealthCheckResult {
-        // Check if the gRPC API port is listening
-        let output = Command::new("netstat").arg("-ln").output();
-
-        match output {
-            Ok(result) => {
-                let stdout = String::from_utf8_lossy(&result.stdout);
-                let port_str = format!(":{}", self.port);
-
-                if stdout.contains(&port_str) {
-                    info!(port = %self.port, "API check passed");
-                    HealthCheckResult::Pass
-                } else {
-                    warn!(port = %self.port, "API port not listening");
-                    HealthCheckResult::Fail(format!("API port {} not listening", self.port))
-                }
+        // Check if the gRPC API port is reachable
+        let addr = format!("127.0.0.1:{}", self.port);
+        match std::net::TcpStream::connect(&addr) {
+            Ok(_) => {
+                info!(port = %self.port, "API check passed");
+                HealthCheckResult::Pass
             }
             Err(e) => {
-                error!(error = %e, "Failed to check API port");
-                HealthCheckResult::Fail(format!("Cannot check API: {}", e))
+                warn!(port = %self.port, error = %e, "API port not reachable");
+                HealthCheckResult::Fail(format!("API port {} not reachable: {}", self.port, e))
             }
         }
     }

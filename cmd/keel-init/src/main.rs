@@ -183,12 +183,12 @@ fn setup_networking() {
 /// Configure loopback interface
 fn configure_loopback() {
     // Using ip command instead of busybox ifconfig for modern networking
-    match Command::new("/bin/ip")
+    match Command::new("/sbin/ip")
         .args(["link", "set", "lo", "up"])
         .status()
     {
         Ok(status) if status.success() => {
-            match Command::new("/bin/ip")
+            match Command::new("/sbin/ip")
                 .args(["addr", "add", "127.0.0.1/8", "dev", "lo"])
                 .status()
             {
@@ -227,7 +227,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
     info!(interface = %iface.name, "Configuring network interface");
 
     // Bring interface up
-    match Command::new("/bin/ip")
+    match Command::new("/sbin/ip")
         .args(["link", "set", &iface.name, "up"])
         .status()
     {
@@ -252,7 +252,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
         InterfaceType::Static(cfg) => {
             // Add IPv4 address if present
             if !cfg.ipv4_address.is_empty() {
-                match Command::new("/bin/ip")
+                match Command::new("/sbin/ip")
                     .args(["addr", "add", &cfg.ipv4_address, "dev", &iface.name])
                     .status()
                 {
@@ -269,7 +269,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
 
                 // Set IPv4 gateway if present
                 if let Some(ref gateway) = cfg.gateway {
-                    match Command::new("/bin/ip")
+                    match Command::new("/sbin/ip")
                         .args([
                             "route",
                             "add",
@@ -296,7 +296,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
 
             // Add IPv6 addresses
             for ipv6_addr in &cfg.ipv6_addresses {
-                match Command::new("/bin/ip")
+                match Command::new("/sbin/ip")
                     .args(["-6", "addr", "add", ipv6_addr, "dev", &iface.name])
                     .status()
                 {
@@ -314,7 +314,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
 
             // Set IPv6 gateway if present
             if let Some(ref gateway6) = cfg.ipv6_gateway {
-                match Command::new("/bin/ip")
+                match Command::new("/sbin/ip")
                     .args([
                         "-6",
                         "route",
@@ -341,7 +341,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
 
             // Set MTU if non-default
             if cfg.mtu != 1500 {
-                match Command::new("/bin/ip")
+                match Command::new("/sbin/ip")
                     .args(["link", "set", &iface.name, "mtu", &cfg.mtu.to_string()])
                     .status()
                 {
@@ -394,7 +394,7 @@ fn configure_route(route: &keel_config::network::RouteConfig) {
         args.extend_from_slice(&["metric", &metric_str]);
     }
 
-    match Command::new("/bin/ip").args(&args).status() {
+    match Command::new("/sbin/ip").args(&args).status() {
         Ok(status) if status.success() => {
             info!(destination = %route.destination, gateway = %route.gateway, "Route configured");
         }
@@ -413,20 +413,20 @@ fn configure_dhcp_fallback() {
 
     // For QEMU testing, use static IP that matches QEMU's default network
     // In production, this would start a proper DHCP client
-    match Command::new("/bin/ip")
+    match Command::new("/sbin/ip")
         .args(["link", "set", "eth0", "up"])
         .status()
     {
         Ok(status) if status.success() => {
             // Use QEMU's default network: 10.0.2.0/24
-            match Command::new("/bin/ip")
+            match Command::new("/sbin/ip")
                 .args(["addr", "add", "10.0.2.15/24", "dev", "eth0"])
                 .status()
             {
                 Ok(status) if status.success() => {
                     debug!("Set eth0 IP to 10.0.2.15/24");
                     // Add default route
-                    let _ = Command::new("/bin/ip")
+                    let _ = Command::new("/sbin/ip")
                         .args(["route", "add", "default", "via", "10.0.2.2", "dev", "eth0"])
                         .status();
                 }

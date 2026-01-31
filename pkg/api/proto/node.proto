@@ -346,6 +346,9 @@ message StaticConfig {
   
   // IPv6 gateway IP address
   string ipv6_gateway = 5;
+  
+  // Enable IPv6 auto-configuration (SLAAC)
+  bool ipv6_auto = 6;
 }
 
 message VLANConfig {
@@ -416,6 +419,23 @@ message InterfaceStatus {
   
   // IPv6 addresses
   repeated string ipv6_addresses = 7;
+  
+  // Detailed IPv6 address information
+  repeated IPv6AddressInfo ipv6_address_info = 8;
+}
+
+message IPv6AddressInfo {
+  // IPv6 address
+  string address = 1;
+  
+  // Prefix length
+  uint32 prefix_len = 2;
+  
+  // Scope (e.g., "global", "link")
+  string scope = 3;
+  
+  // Flags (e.g., "permanent", "dynamic")
+  repeated string flags = 4;
 }
 
 message InterfaceStatistics {
