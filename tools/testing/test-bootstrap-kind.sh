@@ -6,7 +6,7 @@ SETUP_KIND="${PROJECT_ROOT}/tools/testing/setup-kind.sh"
 LOG_FILE="${PROJECT_ROOT}/build/qemu-bootstrap.log"
 CLUSTER_NAME="keel-test"
 TIMEOUT=60
-OSCTL="${PROJECT_ROOT}/target/debug/osctl"
+OSCTL="${PROJECT_ROOT}/build/osctl"
 ENDPOINT="http://localhost:50052"
 
 echo ">>> Starting Kubernetes Bootstrap Integration Test..."
@@ -28,12 +28,12 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# Build osctl if not present
+# Ensure osctl is available (should be from build artifacts in CI)
 if [ ! -f "${OSCTL}" ]; then
-    echo "Building osctl..."
-    cd "${PROJECT_ROOT}"
-    cargo build --bin osctl
-    cd -
+    echo "Error: osctl not found at ${OSCTL}"
+    echo "In CI, it should be downloaded from build artifacts."
+    echo "For local testing, run: cargo build --bin osctl && cp target/debug/osctl build/"
+    exit 1
 fi
 
 # Setup Kind cluster
