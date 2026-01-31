@@ -223,6 +223,55 @@ jobs:
           chmod +x tools/testing/*.sh
           ./tools/testing/test-network.sh
 
+  test-bootstrap-kind:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: keelos-build
+          path: build/
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Protobuf Compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Install QEMU
+        run: sudo apt-get install -y qemu-system-x86
+
+      - name: Install Kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.25.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Make osctl executable
+        run: chmod +x build/osctl
+
+      - name: Run Bootstrap Test
+        run: |
+          chmod +x tools/testing/*.sh
+          ./tools/testing/test-bootstrap-kind.sh
+
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name keel-test || true
+
+
   test-artifacts:
     needs: [build]
     runs-on: ubuntu-latest
