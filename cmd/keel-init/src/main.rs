@@ -645,7 +645,7 @@ fn supervise_services() -> Result<(), InitError> {
         // This handles both explicit restart signal and automatic detection of new kubeconfig
         let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
         let permanent_kubeconfig = "/var/lib/kubelet/kubeconfig";
-        
+
         let should_restart = if std::path::Path::new("/run/keel/restart-kubelet").exists() {
             // Explicit restart signal from keel-agent
             info!("Kubelet restart signal detected");
@@ -656,8 +656,9 @@ fn supervise_services() -> Result<(), InitError> {
         {
             // Bootstrap kubeconfig exists but permanent doesn't - need to bootstrap
             // Track if we've already restarted for this kubeconfig
-            static BOOTSTRAPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-            
+            static BOOTSTRAPPED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+
             if !BOOTSTRAPPED.load(std::sync::atomic::Ordering::Relaxed) {
                 info!("Bootstrap kubeconfig detected - restarting kubelet to join cluster");
                 BOOTSTRAPPED.store(true, std::sync::atomic::Ordering::Relaxed);
