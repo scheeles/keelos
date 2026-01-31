@@ -642,16 +642,41 @@ fn supervise_services() -> Result<(), InitError> {
             }
         }
 
-        // Check for kubelet restart signal (from bootstrap)
-        if Path::new("/run/keel/restart-kubelet").exists() {
+        // Check for bootstrap kubeconfig and restart kubelet if needed
+        // This handles both explicit restart signal and automatic detection of new kubeconfig
+        let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+        let permanent_kubeconfig = "/var/lib/kubelet/kubeconfig";
+        
+        let should_restart = if std::path::Path::new("/run/keel/restart-kubelet").exists() {
+            // Explicit restart signal from keel-agent
             info!("Kubelet restart signal detected");
-            // Kill existing kubelet if running
-            if let Some(mut child) = kubelet {
+            true
+        } else if std::path::Path::new(bootstrap_kubeconfig).exists()
+            && !std::path::Path::new(permanent_kubeconfig).exists()
+            && kubelet.is_some()
+        {
+            // Bootstrap kubeconfig exists but permanent doesn't - need to bootstrap
+            // Track if we've already restarted for this kubeconfig
+            static BOOTSTRAPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            
+            if !BOOTSTRAPPED.load(std::sync::atomic::Ordering::Relaxed) {
+                info!("Bootstrap kubeconfig detected - restarting kubelet to join cluster");
+                BOOTSTRAPPED.store(true, std::sync::atomic::Ordering::Relaxed);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // Restart kubelet if signal detected or kubeconfig changed
+        if should_restart {
+            if let Some(ref mut child) = kubelet {
                 info!("Stopping kubelet for restart");
                 let _ = child.kill();
-                let _ = child.wait(); // Clean up zombie
+                let _ = child.wait();
             }
-            // Remove signal file
             let _ = fs::remove_file("/run/keel/restart-kubelet");
             // Restart kubelet with new configuration
             kubelet = spawn_kubelet();
