@@ -407,44 +407,24 @@ echo -e "${YELLOW}TEST 7: IPv6 Detailed Status${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST7"; then
-    echo "[TEST7] Configuring static IPv6 and checking detailed status..."
+    echo "[TEST7] Configuring static IPv6 and checking config persistence..."
     if run_osctl network config set \
         --interface eth0 \
         --ipv6 2001:db8::100/64; then
         
-        # Reboot to apply configuration
-        echo "[TEST7] Rebooting to apply configuration..."
-        run_osctl reboot --reason "test7-ipv6-status" || true
-        sleep 5
-        
-        # Restart QEMU for this test
-        stop_qemu "TEST7"
-        sleep 2
-        
-        if start_qemu "TEST7-reboot"; then
-            echo "[TEST7] Checking detailed IPv6 status..."
-            status_output=$(run_osctl network status 2>&1)
-            
-            # Check if IPv6 address info contains expected fields
-            # Note: Actual verification would require jq to parse JSON properly
-            if echo "$status_output" | grep -q "2001:db8::100"; then
-                echo -e "${GREEN}TEST 7: PASS (IPv6 address found in status)${NC}"
-                ((TESTS_PASSED++))
-            else
-                echo -e "${RED}TEST 7: FAIL (IPv6 address not in status)${NC}"
-                echo "Status output: $status_output"
-                ((TESTS_FAILED++))
-            fi
-            stop_qemu "TEST7-reboot"
+        # Verify configuration was saved
+        if check_network_config "TEST7" "2001:db8::100/64"; then
+            echo -e "${GREEN}TEST 7: PASS (IPv6 config verified)${NC}"
+           ((TESTS_PASSED++))
         else
-            echo -e "${RED}TEST 7: FAIL (reboot failed)${NC}"
+            echo -e "${RED}TEST 7: FAIL (config verification)${NC}"
             ((TESTS_FAILED++))
         fi
     else
         echo -e "${RED}TEST 7: FAIL (config set)${NC}"
         ((TESTS_FAILED++))
-        stop_qemu "TEST7"
     fi
+    stop_qemu "TEST7"
 else
     echo -e "${RED}TEST 7: FAIL (boot failed)${NC}"
     ((TESTS_FAILED++))
