@@ -25,9 +25,11 @@ authentication:
 authorization:
   mode: AlwaysAllow
 
-# TLS Certificate paths (kubelet will create these via CSR)
-tlsCertFile: /var/lib/kubelet/pki/kubelet.crt
-tlsPrivateKeyFile: /var/lib/kubelet/pki/kubelet.key
+# TLS Certificate Configuration
+# Note: tlsCertFile and tlsPrivateKeyFile are not set here.
+# - For client auth: uses certificates from --bootstrap-kubeconfig / --kubeconfig
+# - For server HTTPS: kubelet auto-generates self-signed certs on first run
+# The bootstrap process will create proper client certificates via CSR approval
 
 # Cluster configuration
 clusterDomain: cluster.local
