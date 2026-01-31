@@ -53,6 +53,16 @@ This document defines the rules for contributing to KeelOS.
 3.  **E2E Tests**: Significant system-wide changes (e.g., networking, container lifecycle) require end-to-end tests using the project's QEMU-based testing framework.
 4.  **No Regressions**: All existing tests and verification scripts must pass before merging.
 
+## GitHub Interactions
+
+- **Always use the GitHub CLI (`gh`) for all GitHub operations**
+- Use `gh pr`, `gh run`, `gh api` instead of browser interactions
+- Examples:
+  - View PR checks: `gh pr checks <pr-number>`
+  - View run logs: `gh run view <run-id> --log`
+  - Check run status: `gh run list --branch <branch>`
+- Only use the browser for creating PRs when the CLI prompt is insufficient
+
 ## Commit Strategy
 
 1.  **Feature Branches**: All work must be performed in feature branches. Never commit directly to `main`.
