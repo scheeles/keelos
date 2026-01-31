@@ -15,7 +15,6 @@ use nix::sys::stat::{umask, Mode};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
 use std::fs;
-use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::{thread, time};
 use tracing::{debug, error, info, warn, Level};
