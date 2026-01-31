@@ -533,9 +533,18 @@ fn reap_zombies() {
     }
 }
 
+/// Debug helper to write to console (visible in QEMU logs)
+fn debug_console(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut console) = std::fs::OpenOptions::new().write(true).open("/dev/console") {
+        let _ = writeln!(console, "[KEEL-INIT DEBUG] {}", msg);
+    }
+}
+
 /// Spawn kubelet with appropriate configuration
 /// Checks for kubeconfig and adds --kubeconfig argument if available
 fn spawn_kubelet() -> Option<Child> {
+    debug_console("spawn_kubelet called - attempting to start kubelet");
     info!("spawn_kubelet called - attempting to start kubelet");
     let kubelet_path = if std::path::Path::new("/var/lib/keel/bin/kubelet").exists() {
         info!("Using override kubelet from /var/lib/keel/bin/kubelet");
@@ -552,6 +561,10 @@ fn spawn_kubelet() -> Option<Child> {
 
     let bootstrap_exists = std::path::Path::new(bootstrap_kubeconfig).exists();
     let permanent_exists = std::path::Path::new(kubeconfig_path).exists();
+    debug_console(&format!(
+        "Kubeconfig status: bootstrap={}, permanent={}",
+        bootstrap_exists, permanent_exists
+    ));
     info!(
         bootstrap_exists = bootstrap_exists,
         permanent_exists = permanent_exists,
@@ -585,11 +598,14 @@ fn spawn_kubelet() -> Option<Child> {
         debug!("No kubeconfig found - kubelet will run in standalone mode");
     }
 
+    debug_console(&format!("Spawning kubelet with {} args", args.len()));
     info!(args = ?args, "Spawning kubelet with args");
     let result = spawn_service("kubelet", kubelet_path, &args);
     if result.is_none() {
+        debug_console("FAILED to spawn kubelet service!");
         error!("Failed to spawn kubelet service!");
     } else {
+        debug_console("Kubelet spawned successfully");
         info!("Kubelet spawned successfully");
     }
     result
@@ -678,6 +694,7 @@ fn supervise_services() -> Result<(), InitError> {
                 std::sync::atomic::AtomicBool::new(false);
 
             if !BOOTSTRAPPED.load(std::sync::atomic::Ordering::Relaxed) {
+                debug_console("Bootstrap kubeconfig detected - triggering restart");
                 info!("Bootstrap kubeconfig detected - restarting kubelet to join cluster");
                 BOOTSTRAPPED.store(true, std::sync::atomic::Ordering::Relaxed);
                 true
@@ -690,6 +707,7 @@ fn supervise_services() -> Result<(), InitError> {
 
         // Restart kubelet if signal detected or kubeconfig changed
         if should_restart {
+            debug_console("Restarting kubelet now");
             if let Some(ref mut child) = kubelet {
                 info!("Stopping kubelet for restart");
                 let _ = child.kill();
@@ -697,6 +715,7 @@ fn supervise_services() -> Result<(), InitError> {
             }
             let _ = fs::remove_file("/run/keel/restart-kubelet");
             // Restart kubelet with new configuration
+            debug_console("Calling spawn_kubelet to restart");
             kubelet = spawn_kubelet();
         }
 
