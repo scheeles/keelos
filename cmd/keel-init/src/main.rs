@@ -536,17 +536,27 @@ fn reap_zombies() {
 /// Spawn kubelet with appropriate configuration
 /// Checks for kubeconfig and adds --kubeconfig argument if available
 fn spawn_kubelet() -> Option<Child> {
+    info!("spawn_kubelet called - attempting to start kubelet");
     let kubelet_path = if std::path::Path::new("/var/lib/keel/bin/kubelet").exists() {
         info!("Using override kubelet from /var/lib/keel/bin/kubelet");
         "/var/lib/keel/bin/kubelet"
     } else {
         "/usr/bin/kubelet"
     };
+    info!(kubelet_path = kubelet_path, "Resolved kubelet binary path");
 
     // Check if kubeconfig exists (set during bootstrap)
     let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
     let kubeconfig_path = "/var/lib/kubelet/kubeconfig"; // Permanent kubeconfig after CSR
     let mut args = vec!["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"];
+
+    let bootstrap_exists = std::path::Path::new(bootstrap_kubeconfig).exists();
+    let permanent_exists = std::path::Path::new(kubeconfig_path).exists();
+    info!(
+        bootstrap_exists = bootstrap_exists,
+        permanent_exists = permanent_exists,
+        "Kubeconfig file status check"
+    );
 
     // Bootstrap flow:
     // 1. If bootstrap kubeconfig exists but permanent doesn't -> initial bootstrap
@@ -575,7 +585,14 @@ fn spawn_kubelet() -> Option<Child> {
         debug!("No kubeconfig found - kubelet will run in standalone mode");
     }
 
-    spawn_service("kubelet", kubelet_path, &args)
+    info!(args = ?args, "Spawning kubelet with args");
+    let result = spawn_service("kubelet", kubelet_path, &args);
+    if result.is_none() {
+        error!("Failed to spawn kubelet service!");
+    } else {
+        info!("Kubelet spawned successfully");
+    }
+    result
 }
 
 /// Main supervision loop for system services
