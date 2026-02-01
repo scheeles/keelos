@@ -2,16 +2,39 @@ apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 cgroupDriver: cgroupfs
 failSwapOn: false
-# Use the containerd socket we established in Phase 3
+
+# Container runtime
 containerRuntimeEndpoint: "unix:///run/containerd/containerd.sock"
-# Allow running static pods from manifests (good for bootstrapping)
+
+# Static pods
 staticPodPath: "/etc/kubernetes/manifests"
-# Minimal environment settings
+
+# TLS Bootstrap - enables kubelet to join cluster via bootstrap token
+serverTLSBootstrap: true
+
+# Authentication
 authentication:
+  # Note: clientCAFile is not set here because the CA cert is written during bootstrap
+  # The kubelet will use the CA from the kubeconfig instead
   anonymous:
-    enabled: true
+    enabled: false  # Security: disable anonymous access
   webhook:
     enabled: false
+
+# Authorization
 authorization:
   mode: AlwaysAllow
+
+# TLS Certificate Configuration
+# Note: tlsCertFile and tlsPrivateKeyFile are not set here.
+# - For client auth: uses certificates from --bootstrap-kubeconfig / --kubeconfig
+# - For server HTTPS: kubelet auto-generates self-signed certs on first run
+# The bootstrap process will create proper client certificates via CSR approval
+
+# Cluster configuration
+clusterDomain: cluster.local
+clusterDNS:
+  - 10.96.0.10  # Default Kubernetes CoreDNS service IP
+
+# Read-only port for health checks
 readOnlyPort: 10255

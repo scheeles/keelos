@@ -61,6 +61,7 @@ cp -L "${PROJECT_ROOT}/tools/builder/containerd-config.toml" "${INITRAMFS_DIR}/e
 
 echo ">>> Copying Kubernetes binaries..."
 mkdir -p "${INITRAMFS_DIR}/var/lib/kubelet"
+mkdir -p "${INITRAMFS_DIR}/var/lib/kubelet/pki"  # For TLS certificates generated via bootstrap
 mkdir -p "${INITRAMFS_DIR}/etc/kubernetes/manifests"
 cp -L /usr/local/bin/kubelet "${INITRAMFS_DIR}/usr/bin/"
 cp -L "${PROJECT_ROOT}/tools/builder/kubelet-config.yaml" "${INITRAMFS_DIR}/etc/kubernetes/kubelet-config.yaml"
