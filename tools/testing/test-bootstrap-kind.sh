@@ -225,6 +225,17 @@ while true; do
     sleep 3
 done
 
+# Extract debug logs from VM (if available)
+echo ""
+echo "Extracting debug logs from VM..."
+if command -v guestfish &>/dev/null; then
+    # Try to extract debug log using guestfish
+    guestfish --ro -a "${IMAGE_FILE}" -m /dev/sda1 cat /tmp/keel-debug.log 2>/dev/null || \
+        echo "  (Debug log not available or guestfish not installed)"
+else
+    echo "  (guestfish not available - cannot extract debug log)"
+fi
+
 # Final summary
 echo ""
 echo "========================================="
