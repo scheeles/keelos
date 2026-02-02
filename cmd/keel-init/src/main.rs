@@ -492,6 +492,8 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
         return None;
     }
 
+    info!(service = name, path = path, args = ?args, "Spawning service");
+    
     let mut cmd = Command::new(path);
     cmd.args(args)
         .stdout(Stdio::inherit())
@@ -499,11 +501,11 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
 
     match cmd.spawn() {
         Ok(child) => {
-            info!(service = name, pid = child.id(), "Service started");
+            info!(service = name, pid = child.id(), "✅ Service started successfully");
             Some(child)
         }
         Err(e) => {
-            error!(service = name, error = %e, "Failed to spawn service");
+            error!(service = name, path = path, args = ?args, error = %e, "❌ Failed to spawn service");
             None
         }
     }
@@ -674,13 +676,23 @@ fn supervise_services() -> Result<(), InitError> {
         // Restart kubelet if signal detected or kubeconfig changed
         if should_restart {
             if let Some(ref mut child) = kubelet {
-                info!("Stopping kubelet for restart");
+                info!(pid = child.id(), "Stopping kubelet for restart");
                 let _ = child.kill();
                 let _ = child.wait();
+                info!("Kubelet process stopped, preparing to respawn");
+            } else {
+                warn!("Restart triggered but kubelet was not running (kubelet=None)");
             }
             let _ = fs::remove_file("/run/keel/restart-kubelet");
             // Restart kubelet with new configuration
+            info!("Calling spawn_kubelet() to restart with bootstrap config");
             kubelet = spawn_kubelet();
+            if kubelet.is_none() {
+                error!("⚠️  CRITICAL: spawn_kubelet() returned None - kubelet failed to restart!");
+                error!("This means kubelet will not join the cluster. Check logs above for spawn errors.");
+            } else {
+                info!(pid = kubelet.as_ref().unwrap().id(), "✅ Kubelet successfully restarted");
+            }
         }
 
         thread::sleep(time::Duration::from_secs(5));
