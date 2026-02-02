@@ -582,17 +582,15 @@ fn spawn_kubelet() -> Option<Child> {
 
 /// Main supervision loop for system services
 fn supervise_services() -> Result<(), InitError> {
-    // Start containerd
-    info!("Starting containerd");
-    let mut containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
-
-    // Start keel-agent
+    // Start keel-agent first - it handles bootstrap
     info!("Starting keel-agent");
     let mut agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
 
-    // Start kubelet (with override support and kubeconfig)
-    info!("Starting kubelet");
-    let mut kubelet = spawn_kubelet();
+    // Wait for bootstrap before starting container services
+    // containerd and kubelet will be started once bootstrap kubeconfig appears
+    info!("Waiting for bootstrap to complete before starting container services...");
+    let mut containerd: Option<Child> = None;
+    let mut kubelet: Option<Child> = None;
 
     // Track restart counts for backoff
     let mut agent_restart_count: u32 = 0;
@@ -643,28 +641,39 @@ fn supervise_services() -> Result<(), InitError> {
             }
         }
 
-        // Check for bootstrap kubeconfig and restart kubelet if needed
-        // This handles both explicit restart signal and automatic detection of new kubeconfig
+        // Check for bootstrap kubeconfig to start or restart services
         let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
         let permanent_kubeconfig = "/var/lib/kubelet/kubeconfig";
+        let bootstrap_exists = std::path::Path::new(bootstrap_kubeconfig).exists();
+        let permanent_exists = std::path::Path::new(permanent_kubeconfig).exists();
 
+        // Start containerd and kubelet once bootstrap is ready
+        if bootstrap_exists && containerd.is_none() {
+            info!("Bootstrap kubeconfig detected - starting container services");
+            
+            info!("Starting containerd");
+            containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
+            
+            // Give containerd a moment to start
+            thread::sleep(time::Duration::from_secs(2));
+            
+            info!("Starting kubelet with bootstrap configuration");
+            kubelet = spawn_kubelet();
+        }
+
+        // Handle explicit restart signal or permanent kubeconfig appearing
         let should_restart = if std::path::Path::new("/run/keel/restart-kubelet").exists() {
             // Explicit restart signal from keel-agent
             info!("Kubelet restart signal detected");
-            true
-        } else if std::path::Path::new(bootstrap_kubeconfig).exists()
-            && !std::path::Path::new(permanent_kubeconfig).exists()
-        {
-            // Bootstrap kubeconfig exists but permanent doesn't - need to bootstrap
-            // Track if we've already restarted for this kubeconfig
-            // Note: We don't check kubelet.is_some() because kubelet might have exited
-            // before this check runs. spawn_kubelet() handles both starting and restarting.
-            static BOOTSTRAPPED: std::sync::atomic::AtomicBool =
+            kubelet.is_some() // Only restart if kubelet is running
+        } else if bootstrap_exists && permanent_exists && kubelet.is_some() {
+            // Permanent kubeconfig appeared - kubelet successfully bootstrapped
+            // Restart to switch from bootstrap to permanent kubeconfig
+            static SWITCHED: std::sync::atomic::AtomicBool =
                 std::sync::atomic::AtomicBool::new(false);
-
-            if !BOOTSTRAPPED.load(std::sync::atomic::Ordering::Relaxed) {
-                info!("Bootstrap kubeconfig detected - restarting kubelet to join cluster");
-                BOOTSTRAPPED.store(true, std::sync::atomic::Ordering::Relaxed);
+            if !SWITCHED.load(std::sync::atomic::Ordering::Relaxed) {
+                info!("Permanent kubeconfig detected - restarting kubelet to use it");
+                SWITCHED.store(true, std::sync::atomic::Ordering::Relaxed);
                 true
             } else {
                 false
@@ -680,12 +689,10 @@ fn supervise_services() -> Result<(), InitError> {
                 let _ = child.kill();
                 let _ = child.wait();
                 info!("Kubelet process stopped, preparing to respawn");
-            } else {
-                warn!("Restart triggered but kubelet was not running (kubelet=None)");
             }
             let _ = fs::remove_file("/run/keel/restart-kubelet");
             // Restart kubelet with new configuration
-            info!("Calling spawn_kubelet() to restart with bootstrap config");
+            info!("Calling spawn_kubelet() to restart with updated config");
             kubelet = spawn_kubelet();
             if kubelet.is_none() {
                 error!("⚠️  CRITICAL: spawn_kubelet() returned None - kubelet failed to restart!");
