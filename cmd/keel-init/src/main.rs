@@ -493,7 +493,7 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
     }
 
     info!(service = name, path = path, args = ?args, "Spawning service");
-    
+
     let mut cmd = Command::new(path);
     cmd.args(args)
         .stdout(Stdio::inherit())
@@ -501,7 +501,11 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
 
     match cmd.spawn() {
         Ok(child) => {
-            info!(service = name, pid = child.id(), "✅ Service started successfully");
+            info!(
+                service = name,
+                pid = child.id(),
+                "✅ Service started successfully"
+            );
             Some(child)
         }
         Err(e) => {
@@ -650,13 +654,13 @@ fn supervise_services() -> Result<(), InitError> {
         // Start containerd and kubelet once bootstrap is ready
         if bootstrap_exists && containerd.is_none() {
             info!("Bootstrap kubeconfig detected - starting container services");
-            
+
             info!("Starting containerd");
             containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
-            
+
             // Give containerd a moment to start
             thread::sleep(time::Duration::from_secs(2));
-            
+
             info!("Starting kubelet with bootstrap configuration");
             kubelet = spawn_kubelet();
         }
@@ -694,11 +698,11 @@ fn supervise_services() -> Result<(), InitError> {
             // Restart kubelet with new configuration
             info!("Calling spawn_kubelet() to restart with updated config");
             kubelet = spawn_kubelet();
-            if kubelet.is_none() {
+            if let Some(ref child) = kubelet {
+                info!(pid = child.id(), "✅ Kubelet successfully restarted");
+            } else {
                 error!("⚠️  CRITICAL: spawn_kubelet() returned None - kubelet failed to restart!");
                 error!("This means kubelet will not join the cluster. Check logs above for spawn errors.");
-            } else {
-                info!(pid = kubelet.as_ref().unwrap().id(), "✅ Kubelet successfully restarted");
             }
         }
 
