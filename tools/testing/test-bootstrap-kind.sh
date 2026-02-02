@@ -57,6 +57,7 @@ kubectl create secret generic "bootstrap-token-${TOKEN_ID}" \
   --from-literal=token-secret="${TOKEN_SECRET}" \
   --from-literal=usage-bootstrap-authentication=true \
   --from-literal=usage-bootstrap-signing=true \
+  --from-literal=auth-extra-groups=system:bootstrappers \
   -n kube-system
 
 echo "Bootstrap token created: ${BOOTSTRAP_TOKEN}"
