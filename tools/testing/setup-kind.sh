@@ -52,11 +52,32 @@ EOF
 echo "Creating kind cluster '${CLUSTER_NAME}'..."
 kind create cluster --name "${CLUSTER_NAME}" --config "${KIND_CONFIG}"
 
+echo ">>> Cluster created. Configuring RBAC for node bootstrap..."
+
+# Allow bootstrap tokens to create CSRs
+echo ">>> Granting CSR creation permissions to bootstrap tokens..."
+kubectl create clusterrolebinding kubeadm:kubelet-bootstrap \
+    --clusterrole=system:node-bootstrapper \
+    --group=system:bootstrappers 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+# Auto-approve kubelet serving certificates
+echo ">>> Configuring auto-approval for kubelet certificates..."
+kubectl create clusterrolebinding auto-approve-csrs-for-group \
+    --clusterrole=system:certificates.k8s.io:certificatesigningrequests:nodeclient \
+    --group=system:bootstrappers 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+kubectl create clusterrolebinding auto-approve-renewals-for-nodes \
+    --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeclient \
+    --group=system:nodes 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+echo ">>> Kind cluster is ready for node bootstrapping"
+
 echo "Waiting for cluster to be ready..."
 kubectl wait --for=condition=Ready nodes --all --timeout=60s
 
+# The following RBAC rules are now redundant as they have been moved and renamed above.
 # Create RBAC for bootstrap tokens (idempotent)
-echo "Creating RBAC for bootstrap tokens..."
+# echo "Creating RBAC for bootstrap tokens..."
 
 # Create ClusterRoleBinding for system:node-bootstrapper
 kubectl create clusterrolebinding kubeadm:kubelet-bootstrap \

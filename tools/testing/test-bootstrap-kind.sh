@@ -57,6 +57,7 @@ kubectl create secret generic "bootstrap-token-${TOKEN_ID}" \
   --from-literal=token-secret="${TOKEN_SECRET}" \
   --from-literal=usage-bootstrap-authentication=true \
   --from-literal=usage-bootstrap-signing=true \
+  --from-literal=auth-extra-groups=system:bootstrappers \
   -n kube-system
 
 echo "Bootstrap token created: ${BOOTSTRAP_TOKEN}"
@@ -159,31 +160,70 @@ else
     exit 1
 fi
 
-# Wait for node to appear in cluster (optional check)
+# Debug: Check for CSRs from the node
+echo ""
+echo "Checking for Certificate Signing Requests..."
+kubectl get csr -o wide || true
+CSR_COUNT=$(kubectl get csr 2>/dev/null | grep -c keelnode || echo "0")
+echo "CSRs found: ${CSR_COUNT}"
+
+# Debug: Check if kubelet is actually running in QEMU
+echo ""
+echo "Checking QEMU logs for kubelet activity..."
+if grep -q "Starting kubelet" "${LOG_FILE}" 2>/dev/null; then
+    echo "✓ Kubelet startup detected in logs"
+    # Show last few kubelet-related log lines
+    echo "Recent kubelet logs:"
+    grep "kubelet" "${LOG_FILE}" 2>/dev/null | tail -10 || true
+else
+    echo "⚠ No kubelet startup messages found in logs"
+fi
+
+# Debug: Verify bootstrap config was applied
+echo ""
+echo "Verifying bootstrap configuration in guest..."
+VERIFY_OUTPUT=$("${OSCTL}" --endpoint "${ENDPOINT}" bootstrap-status 2>&1)
+if echo "${VERIFY_OUTPUT}" | grep -q "ca.crt"; then
+    echo "✓ CA certificate path detected in config"
+else
+    echo "⚠ CA certificate may not be configured"
+fi
+
+# Wait for node to appear in cluster
+echo ""
 echo "Checking if node appears in cluster (waiting up to 90s)..."
 NODE_TIMEOUT=90
 START_TIME=$(date +%s)
-NODE_FOUND=0
+NODE_NAME="keelnode-test"
+NODE_JOINED=0
 
 while true; do
     CURRENT_TIME=$(date +%s)
     ELAPSED=$((CURRENT_TIME - START_TIME))
     
     if [ $ELAPSED -gt $NODE_TIMEOUT ]; then
-        echo "⚠ Node did not appear in cluster after ${NODE_TIMEOUT}s"
-        echo "  This may be expected if kubelet is not fully functional yet."
-        echo "  Bootstrap configuration is still valid."
+        echo "✗ FAIL: Node did not appear in cluster after ${NODE_TIMEOUT}s"
+        echo "  Expected: Node '${NODE_NAME}' should appear in 'kubectl get nodes'"
+        echo "  Actual: Node not found"
+        echo ""
+        echo "Debug information:"
+        echo "  CSRs found: ${CSR_COUNT}"
+        kubectl get csr -o wide 2>/dev/null || echo "  No CSRs"
+        echo ""
+        echo "This indicates kubelet failed to join the cluster."
+        cleanup
+        exit 1
+    fi
+    
+    if kubectl get nodes "${NODE_NAME}" &>/dev/null; then
+        NODE_JOINED=1
+        NODE_STATUS=$(kubectl get node "${NODE_NAME}" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+        echo "✓ Node joined cluster with status: ${NODE_STATUS}"
+        kubectl get nodes "${NODE_NAME}"
         break
     fi
     
-    if kubectl get nodes keelnode-test &>/dev/null; then
-        NODE_FOUND=1
-        echo "✓ Node 'keelnode-test' appeared in cluster!"
-        kubectl get nodes keelnode-test
-        break
-    fi
-    
-    sleep 2
+    sleep 3
 done
 
 # Final summary
@@ -196,10 +236,8 @@ echo "✓ Bootstrap token generated"
 echo "✓ KeelOS agent started in QEMU"
 echo "✓ Bootstrap command executed successfully"
 echo "✓ Bootstrap status verified"
-if [ $NODE_FOUND -eq 1 ]; then
+if [ $NODE_JOINED -eq 1 ]; then
     echo "✓ Node joined cluster successfully"
-else
-    echo "⚠ Node did not join cluster (kubelet may need additional work)"
 fi
 echo "========================================="
 echo ">>> PASS: Bootstrap test completed successfully!"
