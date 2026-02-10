@@ -98,7 +98,7 @@ impl SystemMetrics {
     /// Get CPU usage percentage
     #[allow(dead_code)]
     pub fn cpu_usage(&self) -> f32 {
-        self.system.global_cpu_info().cpu_usage()
+        self.system.global_cpu_usage()
     }
 
     /// Get total memory in bytes
