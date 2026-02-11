@@ -62,7 +62,7 @@ RUN export RUNC_VERSION=1.1.10 && \
     rm runc.amd64
 
 # Install CNI plugins (x86_64 target)
-RUN export CNI_VERSION=1.6.0 && \
+RUN export CNI_VERSION=1.6.2 && \
     mkdir -p /opt/cni/bin && \
     wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504 https://github.com/containernetworking/plugins/releases/download/v${CNI_VERSION}/cni-plugins-linux-amd64-v${CNI_VERSION}.tgz && \
     tar Cxzvf /opt/cni/bin /cni-plugins-linux-amd64-v${CNI_VERSION}.tgz && \
