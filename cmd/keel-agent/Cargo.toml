@@ -33,7 +33,7 @@ opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
 tracing-opentelemetry = "0.32"
-sysinfo = "0.30"
+sysinfo = "0.38"
 async-trait = "0.1"
 
 # Delta update support
