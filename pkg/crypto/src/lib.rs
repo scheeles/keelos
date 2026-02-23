@@ -95,7 +95,7 @@ pub fn generate_self_signed() -> Result<(String, String), CryptoError> {
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
 
     let cert_pem = cert.cert.pem();
-    let key_pem = cert.key_pair.serialize_pem();
+    let key_pem = cert.signing_key.serialize_pem();
 
     Ok((cert_pem, key_pem))
 }
@@ -112,7 +112,7 @@ pub fn generate_bootstrap_certificate(
         .map_err(|e| CryptoError::Cert(e.to_string()))?;
 
     let cert_pem = cert.cert.pem();
-    let key_pem = cert.key_pair.serialize_pem();
+    let key_pem = cert.signing_key.serialize_pem();
 
     Ok((cert_pem, key_pem))
 }

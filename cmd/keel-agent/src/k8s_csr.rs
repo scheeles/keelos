@@ -129,7 +129,7 @@ impl K8sCsrManager {
                 reason: Some("AutoApproved".to_string()),
                 message: Some("Auto-approved by keel-agent".to_string()),
                 last_update_time: Some(k8s_openapi::apimachinery::pkg::apis::meta::v1::Time(
-                    chrono::Utc::now(),
+                    k8s_openapi::jiff::Timestamp::now(),
                 )),
                 ..Default::default()
             };
