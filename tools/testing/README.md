@@ -42,6 +42,16 @@ End-to-end tests for the diagnostics and debugging tools. Boots KeelOS in QEMU a
 
 Each test runs in an isolated QEMU instance with a unique gRPC port.
 
+### `test-audit.sh`
+
+End-to-end tests for the audit logging system. Boots KeelOS in QEMU and verifies that all gRPC API operations are automatically recorded in the audit log:
+*   **Audit Log Creation**: Verifies audit entries are generated after API calls.
+*   **Multiple Operations**: Confirms that successive API calls each produce audit entries.
+*   **Method Name Capture**: Checks that audit entries contain the gRPC method path (e.g. `GetHealth`).
+*   **Diagnostic Audit Trail**: Validates that diagnostic operations like `EnableDebugMode` are captured.
+
+Each test runs in an isolated QEMU instance with a unique gRPC port.
+
 ## Setup
 
 ### `setup-test-disk.sh`
