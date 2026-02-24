@@ -39,6 +39,8 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 
 # Each test uses a unique port to avoid stale port state from previous QEMU instances
+# Starts at 50070 to avoid conflicts with other test scripts:
+#   test-network.sh uses 50052+, test-diagnostics.sh uses 50060+
 NEXT_PORT=50070
 
 # Cleanup trap to remove temporary disk images on exit
