@@ -38,21 +38,25 @@ echo ""
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Each test uses a unique port to avoid stale port state from previous QEMU instances
+NEXT_PORT=50052
+
 # Helper function to start QEMU
 start_qemu() {
     local test_name="$1"
-    echo -e "${YELLOW}[${test_name}] Starting QEMU...${NC}"
     
-    # Ensure port 50052 is available
-    local pids=$(lsof -ti:50052 2>/dev/null)
-    if [ -n "$pids" ]; then
-        echo "[${test_name}] Port 50052 is in use (PIDs: $pids), killing processes..."
-        echo "$pids" | xargs kill -9 2>/dev/null || true
-        sleep 2
-    fi
+    # Assign a unique port for this test
+    CURRENT_PORT=$NEXT_PORT
+    NEXT_PORT=$((NEXT_PORT + 1))
+    
+    echo -e "${YELLOW}[${test_name}] Starting QEMU (port ${CURRENT_PORT})...${NC}"
+    
+    # Copy disk image for this test (avoids write lock conflicts between QEMU instances)
+    CURRENT_DISK="${BUILD_DIR}/sda-${test_name}.img"
+    cp "${BUILD_DIR}/sda.img" "${CURRENT_DISK}"
     
     rm -f "${LOG_FILE}"
-    "${PROJECT_ROOT}/tools/testing/run-qemu.sh" > "${LOG_FILE}" 2>&1 &
+    QEMU_HOST_PORT=$CURRENT_PORT QEMU_DISK="$CURRENT_DISK" "${PROJECT_ROOT}/tools/testing/run-qemu.sh" > "${LOG_FILE}" 2>&1 &
     QEMU_PID=$!
     
     echo "[${test_name}] QEMU PID: ${QEMU_PID}"
@@ -78,9 +82,9 @@ start_qemu() {
             echo "[${test_name}] Waiting for gRPC server to be ready..."
             local grpc_ready=false
             for i in {1..20}; do
-                if nc -z localhost 50052 2>/dev/null; then
+                if nc -z localhost $CURRENT_PORT 2>/dev/null; then
                     grpc_ready=true
-                    echo "[${test_name}] gRPC server is accepting connections"
+                    echo "[${test_name}] gRPC server is accepting connections on port ${CURRENT_PORT}"
                     sleep 2  # Extra stabilization time
                     break
                 fi
@@ -88,7 +92,7 @@ start_qemu() {
             done
             
             if [ "$grpc_ready" = false ]; then
-                echo -e "${RED}[${test_name}] WARNING: gRPC server not responding on port 50052${NC}"
+                echo -e "${RED}[${test_name}] WARNING: gRPC server not responding on port ${CURRENT_PORT}${NC}"
                 sleep 2  # Try anyway
             fi
             
@@ -111,34 +115,17 @@ stop_qemu() {
     local test_name="$1"
     echo "[${test_name}] Stopping QEMU (PID: ${QEMU_PID})"
     kill -9 $QEMU_PID 2>/dev/null || true
-    
-    # Wait for the port to be released (up to 10 seconds)
-    local port_free=false
-    for i in {1..20}; do
-        if ! lsof -ti:50052 >/dev/null 2>&1 && ! ss -tuln 2>/dev/null | grep -q ":50052 "; then
-            port_free=true
-            echo "[${test_name}] Port 50052 released"
-            break
-        fi
-        sleep 0.5
-    done
-    
-    if [ "$port_free" = false ]; then
-        echo "[${test_name}] Warning: Port 50052 may still be in use"
-        # Force kill any process using the port
-        local pids=$(lsof -ti:50052 2>/dev/null)
-        if [ -n "$pids" ]; then
-            echo "$pids" | xargs kill -9 2>/dev/null || true
-        fi
-        sleep 1
-    fi
+    wait $QEMU_PID 2>/dev/null || true
+    # Clean up per-test disk image copy
+    rm -f "${CURRENT_DISK}" 2>/dev/null || true
+    echo "[${test_name}] QEMU stopped"
 }
 
 # Helper function to run osctl command
 run_osctl() {
     local cmd="$*"
     echo "    $ osctl ${cmd}"
-    "${OSCTL}" --endpoint http://localhost:50052 $cmd
+    "${OSCTL}" --endpoint http://localhost:${CURRENT_PORT} $cmd
 }
 
 # Helper function to check network config

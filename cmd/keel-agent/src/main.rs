@@ -875,7 +875,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bootstrap_ca_dir = "/var/lib/keel/crypto/trusted-clients/bootstrap";
     let operational_ca_path = "/etc/keel/crypto/ca.pem";
 
-    let mut builder = Server::builder();
+    let mut builder = Server::builder()
+        .http2_keepalive_interval(Some(std::time::Duration::from_secs(10)))
+        .http2_keepalive_timeout(Some(std::time::Duration::from_secs(20)))
+        .tcp_keepalive(Some(std::time::Duration::from_secs(10)));
 
     // Try to configure TLS with dual-CA support
     let tls_manager = TlsManager::new(

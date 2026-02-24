@@ -55,7 +55,60 @@ make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- x86_64_defconfig
 ./scripts/config --enable CONFIG_X86_64
 ./scripts/config --disable CONFIG_DEBUG_INFO
 
-./scripts/config --disable CONFIG_DEBUG_INFO
+# eBPF support (required for cgroup v2 device filtering in runc/containerd)
+./scripts/config --enable CONFIG_BPF
+./scripts/config --enable CONFIG_BPF_SYSCALL
+./scripts/config --enable CONFIG_CGROUP_BPF
+./scripts/config --enable CONFIG_CGROUP_DEVICE
+
+# Cgroup v2 controllers (required for kubelet/runc resource management)
+./scripts/config --enable CONFIG_CGROUPS
+./scripts/config --enable CONFIG_MEMCG
+./scripts/config --enable CONFIG_CGROUP_PIDS
+./scripts/config --enable CONFIG_CGROUP_SCHED
+./scripts/config --enable CONFIG_CFS_BANDWIDTH
+./scripts/config --enable CONFIG_CPUSETS
+./scripts/config --enable CONFIG_BLK_CGROUP
+
+# Namespaces (required for container isolation)
+./scripts/config --enable CONFIG_NAMESPACES
+./scripts/config --enable CONFIG_NET_NS
+./scripts/config --enable CONFIG_PID_NS
+./scripts/config --enable CONFIG_IPC_NS
+./scripts/config --enable CONFIG_UTS_NS
+./scripts/config --enable CONFIG_USER_NS
+
+# Networking (required for CNI/pod networking)
+./scripts/config --enable CONFIG_VETH
+./scripts/config --enable CONFIG_BRIDGE
+./scripts/config --enable CONFIG_BRIDGE_NETFILTER
+./scripts/config --enable CONFIG_NETFILTER
+./scripts/config --enable CONFIG_NETFILTER_ADVANCED
+./scripts/config --enable CONFIG_NETFILTER_XTABLES
+./scripts/config --enable CONFIG_NF_CONNTRACK
+./scripts/config --enable CONFIG_NF_NAT
+./scripts/config --enable CONFIG_NF_TABLES
+./scripts/config --enable CONFIG_NF_TABLES_IPV4
+./scripts/config --enable CONFIG_NF_TABLES_IPV6
+./scripts/config --enable CONFIG_IP_NF_IPTABLES
+./scripts/config --enable CONFIG_IP_NF_NAT
+./scripts/config --enable CONFIG_IP_NF_FILTER
+./scripts/config --enable CONFIG_IP6_NF_IPTABLES
+./scripts/config --enable CONFIG_IP6_NF_FILTER
+./scripts/config --enable CONFIG_IP6_NF_NAT
+
+# Container runtime support (required by runc/containerd-shim)
+./scripts/config --enable CONFIG_SECCOMP
+./scripts/config --enable CONFIG_SECCOMP_FILTER
+./scripts/config --enable CONFIG_FHANDLE
+./scripts/config --enable CONFIG_TMPFS
+./scripts/config --enable CONFIG_CGROUP_FREEZER
+./scripts/config --enable CONFIG_PROC_FS
+./scripts/config --enable CONFIG_POSIX_MQUEUE
+./scripts/config --enable CONFIG_KEYS
+./scripts/config --enable CONFIG_EPOLL
+./scripts/config --enable CONFIG_SIGNALFD
+./scripts/config --enable CONFIG_TIMERFD
 
 # Update config to resolve any new dependencies non-interactively
 make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- olddefconfig
