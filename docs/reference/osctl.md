@@ -11,6 +11,9 @@
 > [!TIP]
 > Run `osctl init bootstrap --node <ip>` to enable mTLS. After that, `osctl` auto-loads certificates from the local cert store for all subsequent connections.
 
+> [!NOTE]
+> When mTLS is enabled, commands are authorized based on the client certificate's role (Admin, Operator, or Viewer). See the [RBAC Guide](../guides/rbac.md) for details on which commands require which role.
+
 ## Commands
 
 ### `status`
