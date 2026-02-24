@@ -45,6 +45,7 @@ mod hooks;
 mod k8s_csr;
 mod mtls;
 mod network;
+mod rbac;
 mod telemetry;
 mod update_scheduler;
 
@@ -67,6 +68,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetStatusRequest>,
     ) -> Result<Response<GetStatusResponse>, Status> {
+        rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Received get_status request");
         let reply = GetStatusResponse {
             hostname: "keel-node".to_string(),    // TODO: Get from hostname
@@ -81,6 +83,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<RebootRequest>,
     ) -> Result<Response<RebootResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Admin)?;
         let reason = request.into_inner().reason;
         info!(reason = %reason, "Reboot requested");
         // In real impl, checking authZ then shelling out to reboot or trigger syscall
@@ -93,6 +96,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<InstallUpdateRequest>,
     ) -> Result<Response<Self::InstallUpdateStream>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         let req = request.into_inner();
         let source_url = req.source_url.clone();
         let expected_sha256 = if req.expected_sha256.is_empty() {
@@ -210,6 +214,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<ScheduleUpdateRequest>,
     ) -> Result<Response<ScheduleUpdateResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         let req = request.into_inner();
 
         info!(
@@ -295,6 +300,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetUpdateScheduleRequest>,
     ) -> Result<Response<GetUpdateScheduleResponse>, Status> {
+        rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Get update schedule requested");
 
         let schedules = self.scheduler.get_schedules().await;
@@ -321,6 +327,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<CancelScheduledUpdateRequest>,
     ) -> Result<Response<CancelScheduledUpdateResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         let req = request.into_inner();
 
         info!(schedule_id = %req.schedule_id, "Cancel scheduled update requested");
@@ -341,6 +348,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetHealthRequest>,
     ) -> Result<Response<GetHealthResponse>, Status> {
+        rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Get health requested");
 
         let (status, executions) = self.health_checker.run_all_checks().await;
@@ -370,6 +378,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<TriggerRollbackRequest>,
     ) -> Result<Response<TriggerRollbackResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Admin)?;
         let reason = request.into_inner().reason;
 
         info!(reason = %reason, "Manual rollback requested");
@@ -398,6 +407,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetRollbackHistoryRequest>,
     ) -> Result<Response<GetRollbackHistoryResponse>, Status> {
+        rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Get rollback history requested");
 
         // Get all schedules that have been rolled back
@@ -426,6 +436,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<BootstrapKubernetesRequest>,
     ) -> Result<Response<BootstrapKubernetesResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Admin)?;
         let req = request.into_inner();
 
         info!(
@@ -542,6 +553,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetBootstrapStatusRequest>,
     ) -> Result<Response<GetBootstrapStatusResponse>, Status> {
+        rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Get bootstrap status requested");
 
         let base_path = "/var/lib/keel";
@@ -630,6 +642,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<RotateCertificateRequest>,
     ) -> Result<Response<RotateCertificateResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         use k8s_csr::K8sCsrManager;
 
         let req = request.into_inner();
@@ -714,6 +727,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<ConfigureNetworkRequest>,
     ) -> Result<Response<ConfigureNetworkResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Admin)?;
         network::configure_network(request).await
     }
 
@@ -721,6 +735,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<GetNetworkConfigRequest>,
     ) -> Result<Response<GetNetworkConfigResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Viewer)?;
         network::get_network_config(request).await
     }
 
@@ -728,6 +743,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<GetNetworkStatusRequest>,
     ) -> Result<Response<GetNetworkStatusResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Viewer)?;
         network::get_network_status(request).await
     }
 
@@ -735,6 +751,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<EnableDebugModeRequest>,
     ) -> Result<Response<EnableDebugModeResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Admin)?;
         let req = request.into_inner();
 
         info!(
@@ -767,6 +784,7 @@ impl NodeService for HelperNodeService {
         &self,
         _request: Request<GetDebugStatusRequest>,
     ) -> Result<Response<GetDebugStatusResponse>, Status> {
+        rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Get debug status requested");
 
         match self.diagnostics.get_debug_status().await {
@@ -795,6 +813,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<CollectCrashDumpRequest>,
     ) -> Result<Response<CollectCrashDumpResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         let req = request.into_inner();
 
         info!(
@@ -827,6 +846,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<StreamLogsRequest>,
     ) -> Result<Response<Self::StreamLogsStream>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         let req = request.into_inner();
         let level_filter = req.level.clone();
         let component_filter = req.component.clone();
@@ -874,6 +894,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<CreateSystemSnapshotRequest>,
     ) -> Result<Response<CreateSystemSnapshotResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Operator)?;
         let req = request.into_inner();
 
         info!(
@@ -910,6 +931,7 @@ impl NodeService for HelperNodeService {
         &self,
         request: Request<EnableRecoveryModeRequest>,
     ) -> Result<Response<EnableRecoveryModeResponse>, Status> {
+        rbac::authorize(&request, rbac::Role::Admin)?;
         let req = request.into_inner();
 
         info!(

@@ -43,3 +43,64 @@ subjects:
 - kind: ServiceAccount
   name: keel-agent
   namespace: keel-system
+
+---
+
+# ============================================================
+# keel-agent gRPC RBAC Roles
+#
+# These ClusterRoles define the RBAC roles for clients connecting
+# to the keel-agent gRPC API. Client certificates issued with the
+# corresponding Organization (O) field are granted the matching
+# permissions on keel-agent endpoints.
+#
+# Role mapping (certificate O field → keel-agent role):
+#   system:masters / keel:admin    → admin
+#   keel:operator                  → operator
+#   keel:viewer                    → viewer
+# ============================================================
+
+# Admin: Full access to all keel-agent gRPC endpoints including
+# dangerous operations (reboot, rollback, network config, debug/recovery mode).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keel-agent-admin
+  labels:
+    app.kubernetes.io/part-of: keelos
+rules:
+- apiGroups: ["keel.v1"]
+  resources: ["*"]
+  verbs: ["*"]
+
+---
+
+# Operator: Access to operational endpoints (updates, snapshots,
+# cert rotation, log streaming) but not dangerous operations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keel-agent-operator
+  labels:
+    app.kubernetes.io/part-of: keelos
+rules:
+- apiGroups: ["keel.v1"]
+  resources: ["updates", "snapshots", "certificates", "logs", "crashdumps"]
+  verbs: ["create", "get", "list", "delete"]
+- apiGroups: ["keel.v1"]
+  resources: ["status", "health", "schedules", "rollbackhistory", "bootstrapstatus", "networkconfig", "networkstatus", "debugstatus"]
+  verbs: ["get", "list"]
+
+---
+
+# Viewer: Read-only access to status, health, schedules, and history.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keel-agent-viewer
+  labels:
+    app.kubernetes.io/part-of: keelos
+rules:
+- apiGroups: ["keel.v1"]
+  resources: ["status", "health", "schedules", "rollbackhistory", "bootstrapstatus", "networkconfig", "networkstatus", "debugstatus"]
+  verbs: ["get", "list"]

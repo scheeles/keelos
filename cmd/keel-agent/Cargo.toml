@@ -49,3 +49,6 @@ rcgen = "0.14"
 
 # Certificate metrics
 once_cell = "1.19"
+
+# RBAC certificate parsing
+x509-parser = "0.18"
