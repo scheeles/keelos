@@ -295,3 +295,160 @@ jobs:
         run: |
           chmod +x tools/testing/*.sh
           ./tools/testing/verify-artifacts.sh
+
+  test-diagnostics:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: keelos-build
+          path: build/
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Make osctl executable
+        run: chmod +x build/osctl
+
+      - name: Run Diagnostics E2E Test
+        run: |
+          chmod +x tools/testing/*.sh
+          ./tools/testing/test-diagnostics.sh
+
+  test-rbac:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: keelos-build
+          path: build/
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Make osctl executable
+        run: chmod +x build/osctl
+
+      - name: Run RBAC E2E Test
+        run: |
+          chmod +x tools/testing/*.sh
+          ./tools/testing/test-rbac.sh
+
+  test-delta-update:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v5
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('tools/builder/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Build Builder Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tools/builder
+          push: false
+          load: true
+          tags: keelos-builder:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Run Delta Update Test
+        run: |
+          mkdir -p build
+          chmod +x tools/testing/*.sh tools/builder/*.sh
+          ./tools/testing/test-delta-update.sh
+
+  test-update-flow:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v5
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('tools/builder/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Cache Cargo Registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Kernel Sources
+        uses: actions/cache@v5
+        with:
+          path: .cache/kernel
+          key: ${{ runner.os }}-kernel-sources
+          restore-keys: |
+            ${{ runner.os }}-kernel-sources
+
+      - name: Cache Built Kernel
+        uses: actions/cache@v5
+        with:
+          path: build/kernel
+          key: ${{ runner.os }}-kernel-build-v2-${{ hashFiles('tools/builder/kernel-build.sh') }}
+
+      - name: Build Builder Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tools/builder
+          push: false
+          load: true
+          tags: keelos-builder:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Prepare build directories
+        run: mkdir -p target .cache/kernel build
+
+      - name: Run Update Flow Test
+        run: |
+          chmod +x tools/testing/*.sh
+          ./tools/testing/test-update-flow.sh
