@@ -970,6 +970,22 @@ async fn schedule_executor(scheduler: Arc<UpdateScheduler>) {
         let due_schedules = scheduler.get_due_schedules().await;
 
         for schedule in due_schedules {
+            // Enforce maintenance window
+            if !UpdateScheduler::is_within_maintenance_window(&schedule) {
+                warn!(
+                    schedule_id = %schedule.id,
+                    "Skipping scheduled update: outside maintenance window"
+                );
+                let _ = scheduler
+                    .update_status(
+                        &schedule.id,
+                        ScheduleStatus::Failed,
+                        Some("Maintenance window expired".to_string()),
+                    )
+                    .await;
+                continue;
+            }
+
             info!(
                 schedule_id = %schedule.id,
                 source = %schedule.source_url,
@@ -1038,6 +1054,11 @@ async fn execute_scheduled_update(
         execute_hook(hook, "post-update").await?;
     }
 
+    // Record active partition before switching for rollback support
+    if let Err(e) = disk::record_active_partition_for_rollback() {
+        warn!(error = %e, "Failed to record active partition for rollback");
+    }
+
     // Switch boot partition
     disk::switch_boot_partition(inactive.index).map_err(|e| e.to_string())?;
 
@@ -1048,9 +1069,18 @@ async fn execute_scheduled_update(
 async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<UpdateScheduler>) {
     use tokio::time::{sleep, Duration};
 
-    // Allow system to stabilize (initial grace period)
-    info!("Rollback supervisor started - waiting for system stability (60s)");
-    sleep(Duration::from_secs(60)).await;
+    // Use health check timeout from the latest schedule if available, otherwise default to 60s
+    let grace_secs = scheduler
+        .get_latest_active_schedule()
+        .await
+        .and_then(|s| s.health_check_timeout_secs)
+        .map_or(60, u64::from);
+
+    info!(
+        grace_secs = grace_secs,
+        "Rollback supervisor started - waiting for system stability"
+    );
+    sleep(Duration::from_secs(grace_secs)).await;
 
     // Run critical check
     let (status, _) = health.run_all_checks().await;
@@ -1058,14 +1088,20 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
     if status == health_check::HealthStatus::Unhealthy {
         error!(status = %status, "Critical health failure detected!");
 
-        // Try to identify if there was a recent update to mark as failed/rolledback
-        // In a real scenario, we'd query the scheduler for the last "Completed" update that might be the cause
-        // For now, we'll log it at the system level.
+        // Check if the latest update had auto-rollback enabled
+        let auto_rollback_enabled = scheduler
+            .get_latest_active_schedule()
+            .await
+            .is_some_and(|s| s.enable_auto_rollback);
+
+        if !auto_rollback_enabled {
+            warn!("Auto-rollback is not enabled for the latest update schedule; skipping automatic rollback");
+            return;
+        }
 
         warn!("Initiating AUTOMATIC ROLLBACK due to critical health failure");
 
-        // Attempt to persist rollback state (best effort before reboot)
-        // Note: This relies on storage being writable and shared across boots if we want to see it after rollback
+        // Persist rollback state before rebooting
         if let Err(e) = scheduler
             .register_rollback("Critical health failure at boot")
             .await
