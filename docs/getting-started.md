@@ -95,7 +95,38 @@ Exit the Docker container (type `exit`) and run on your host:
 
 You should see the KeelOS boot sequence. The system will initialize and start `keel-agent`.
 
+## Building Image Variants
+
+KeelOS supports specialized image variants for different deployment environments. Inside the build container:
+
+```bash
+# Build a specific variant
+./tools/builder/build-variant.sh <variant> [version]
+
+# Available variants:
+#   cloud       - Cloud images with metadata integration (AWS, GCP, Azure)
+#   bare-metal  - Physical hardware with PXE boot and hardware drivers
+#   edge        - Minimal footprint for resource-constrained environments
+#   dev         - Debug tools and symbols (not for production)
+```
+
+**Examples:**
+
+```bash
+# Build cloud variant for v1.0.0 release
+./tools/builder/build-variant.sh cloud v1.0.0
+
+# Build edge variant with reused kernel
+SKIP_KERNEL=1 ./tools/builder/build-variant.sh edge v1.0.0
+
+# List available variants
+./tools/builder/build-variant.sh
+```
+
+Output artifacts are written to `build/variants/<variant>/`. See [Image Variants](./image-variants.md) for details on each variant.
+
 ## Next Steps
 
 *   [Using osctl](./using-osctl.md) - Learn how to interact with a running KeelOS node.
 *   [Architecture Overview](./architecture.md) - Understand how KeelOS is designed.
+*   [Image Variants](./image-variants.md) - Build specialized images for different environments.
