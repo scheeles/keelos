@@ -33,24 +33,28 @@ cargo build --release --package osctl
 
 ---
 
-Every command requires a target node address:
+## Connecting to a Node
+
+Every command requires a target node endpoint:
 
 ```bash
-osctl --addr <NODE_IP>:50051 <command>
+osctl --endpoint http://<NODE_IP>:50051 <command>
 ```
 
 When testing locally with QEMU (using `run-qemu.sh`), the agent is forwarded to `localhost:50052`:
 
 ```bash
-osctl --addr 127.0.0.1:50052 <command>
+osctl --endpoint http://127.0.0.1:50052 <command>
 ```
+
+The default endpoint is `http://[::1]:50051` (IPv6 loopback).
 
 ## Commands
 
 ### Check Node Status
 
 ```bash
-osctl --addr 127.0.0.1:50052 status
+osctl --endpoint http://127.0.0.1:50052 status
 ```
 
 Returns system information including:
@@ -62,7 +66,7 @@ Returns system information including:
 ### Install an Update
 
 ```bash
-osctl --addr 127.0.0.1:50052 install --image oci://registry.example.com/keelos:1.0.1
+osctl --endpoint http://127.0.0.1:50052 update --source https://example.com/keelos-v0.2.0.squashfs
 ```
 
 This downloads the new OS image and writes it to the inactive partition. After installation, reboot to activate.
@@ -70,30 +74,56 @@ This downloads the new OS image and writes it to the inactive partition. After i
 ### Reboot the Node
 
 ```bash
-osctl --addr 127.0.0.1:50052 reboot
+osctl --endpoint http://127.0.0.1:50052 reboot
 ```
 
 Initiates a graceful shutdown of all services and reboots into the newly installed partition.
 
-### Stream Logs
+### Join a Kubernetes Cluster
 
 ```bash
-osctl --addr 127.0.0.1:50052 logs --component kubelet
-osctl --addr 127.0.0.1:50052 logs --component containerd
-osctl --addr 127.0.0.1:50052 logs --component agent
+osctl --endpoint http://127.0.0.1:50052 bootstrap \
+  --api-server https://k8s.example.com:6443 \
+  --token abcdef.0123456789abcdef \
+  --ca-cert ca.crt
 ```
 
-Streams real-time logs from the specified component.
+Configures kubelet TLS bootstrapping so the node can join a Kubernetes cluster. See the [Kubernetes Bootstrap Guide](docs/guides/kubernetes-bootstrap.md) for detailed instructions.
 
-### Network Configuration (Planned)
+### Check Bootstrap Status
 
 ```bash
-osctl --addr 127.0.0.1:50052 network set --ip 10.0.0.5/24 --gateway 10.0.0.1
+osctl --endpoint http://127.0.0.1:50052 bootstrap-status
+```
+
+Shows whether the node is bootstrapped and the connection details.
+
+### Network Configuration
+
+```bash
+# View network status
+osctl --endpoint http://127.0.0.1:50052 network status
+
+# Set static IP
+osctl --endpoint http://127.0.0.1:50052 network config set \
+  --interface eth0 --ip 10.0.0.5/24 --gateway 10.0.0.1
+
+# Set DNS servers
+osctl --endpoint http://127.0.0.1:50052 network dns set \
+  --nameserver 8.8.8.8 --nameserver 1.1.1.1
 ```
 
 ## Authentication
 
-> [!NOTE]
-> mTLS authentication is planned but not yet implemented in the alpha release.
+`osctl` supports mutual TLS (mTLS) for secure communication with `keel-agent`. Certificates are managed automatically via a local cert store.
 
-In production, `osctl` will require client certificates to authenticate with the agent.
+### Enable mTLS
+
+```bash
+# Generate a 24-hour bootstrap certificate
+osctl init bootstrap --node <NODE_IP>
+```
+
+After this, all subsequent `osctl` commands automatically use mTLS. The certificates are stored locally and `osctl` will select the best available certificate (preferring operational over bootstrap) on each connection.
+
+For full CLI reference, see [osctl Reference](docs/reference/osctl.md).

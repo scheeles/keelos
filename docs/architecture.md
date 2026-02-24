@@ -23,10 +23,15 @@ sequenceDiagram
     BIOS/UEFI->>Kernel: Load bzImage + initramfs
     Kernel->>keel-init: Execute /init (PID 1)
     keel-init->>keel-init: Mount /proc, /sys, /dev
-    keel-init->>keel-init: Mount persistent storage
-    keel-init->>containerd: Start containerd
-    keel-init->>kubelet: Start kubelet
+    keel-init->>keel-init: Mount persistent storage (/data)
+    keel-init->>keel-init: Bind-mount /var/lib/containerd, kubelet, keel
+    keel-init->>keel-init: Setup cgroup v2
+    keel-init->>keel-init: Set hostname
+    keel-init->>keel-init: Configure networking
     keel-init->>keel-agent: Start gRPC agent
+    keel-init->>containerd: Start containerd
+    keel-init->>containerd: Import pre-loaded images
+    keel-init->>kubelet: Start kubelet (standalone or bootstrap mode)
     keel-agent-->>keel-agent: Listen on :50051
 ```
 
@@ -34,11 +39,11 @@ sequenceDiagram
 
 | Component       | Role                                      |
 |-----------------|-------------------------------------------|
-| `keel-init`    | PID 1. Mounts filesystems, supervises processes, reaps zombies. |
-| `keel-agent`   | gRPC server. Handles updates, reboots, configuration. |
-| `osctl`         | CLI client for `keel-agent`. |
+| `keel-init`    | PID 1. Mounts filesystems, sets up persistent storage and cgroup v2, supervises processes, manages kubelet bootstrap lifecycle, reaps zombies. |
+| `keel-agent`   | gRPC server. Handles updates, reboots, Kubernetes bootstrap, network configuration, and certificate management. |
+| `osctl`         | CLI client for `keel-agent`. Manages mTLS certificates via local cert store. |
 | `containerd`    | Container runtime (stock, unmodified). |
-| `kubelet`       | Kubernetes node agent (stock, unmodified). |
+| `kubelet`       | Kubernetes node agent (stock, unmodified). Supports standalone, bootstrap, and cluster modes. |
 
 ## Partition Layout
 
