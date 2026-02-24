@@ -15,7 +15,6 @@ use nix::sys::stat::{umask, Mode};
 use nix::sys::wait::{waitpid, WaitPidFlag, WaitStatus};
 use nix::unistd::Pid;
 use std::fs;
-use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::{thread, time};
 use tracing::{debug, error, info, warn, Level};
@@ -53,6 +52,13 @@ fn run() -> Result<(), InitError> {
     // Set safe umask
     umask(Mode::from_bits(0o077).unwrap());
 
+    // Set PATH - as PID 1, we have no inherited PATH from a parent process.
+    // Child processes (kubelet, containerd, etc.) need this to find binaries like mount.
+    std::env::set_var(
+        "PATH",
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    );
+
     // Initialize boot phase tracker
     let mut boot_tracker = telemetry::BootPhaseTracker::new();
 
@@ -60,9 +66,16 @@ fn run() -> Result<(), InitError> {
     boot_tracker.start_phase("filesystem");
     setup_filesystems()?;
 
+    // Mount persistent storage for container data
+    boot_tracker.start_phase("storage");
+    setup_persistent_storage();
+
     // Set up cgroups
     boot_tracker.start_phase("cgroups");
     setup_cgroups();
+
+    // Set hostname
+    setup_hostname();
 
     // Configure networking
     boot_tracker.start_phase("network");
@@ -113,6 +126,29 @@ fn setup_filesystems() -> Result<(), InitError> {
     let _ = fs::create_dir_all("/dev");
     let _ = fs::create_dir_all("/tmp");
 
+    // Mount the root filesystem as shared/remount to support pivot_root (required by runc)
+    // When running from initramfs, root is not a mount point, which breaks pivot_root
+    if let Err(e) = mount::<str, str, str, str>(
+        Some("/"),
+        "/",
+        None,
+        MsFlags::MS_BIND | MsFlags::MS_REC,
+        None,
+    ) {
+        warn!(error = %e, "Failed to bind mount / to /");
+    } else {
+        debug!("Bind mounted / to /");
+    }
+
+    // Make the mount private to avoid propagation issues
+    if let Err(e) =
+        mount::<str, str, str, str>(None, "/", None, MsFlags::MS_PRIVATE | MsFlags::MS_REC, None)
+    {
+        warn!(error = %e, "Failed to make / private");
+    } else {
+        debug!("Made / mount private");
+    }
+
     // Mount proc - critical for process management
     if let Err(e) =
         mount::<str, str, str, str>(Some("none"), "/proc", Some("proc"), MsFlags::empty(), None)
@@ -144,6 +180,48 @@ fn setup_filesystems() -> Result<(), InitError> {
         debug!("Mounted /dev");
     }
 
+    // Mount devpts - needed by runc/containerd for container PTY allocation
+    let _ = fs::create_dir_all("/dev/pts");
+    if let Err(e) = mount::<str, str, str, str>(
+        Some("devpts"),
+        "/dev/pts",
+        Some("devpts"),
+        MsFlags::empty(),
+        Some("newinstance,ptmxmode=0666,mode=0620"),
+    ) {
+        warn!(error = %e, "Failed to mount /dev/pts");
+    } else {
+        debug!("Mounted /dev/pts");
+    }
+
+    // Mount /dev/shm - needed for POSIX shared memory in containers
+    let _ = fs::create_dir_all("/dev/shm");
+    if let Err(e) = mount::<str, str, str, str>(
+        Some("tmpfs"),
+        "/dev/shm",
+        Some("tmpfs"),
+        MsFlags::empty(),
+        Some("size=64m"),
+    ) {
+        warn!(error = %e, "Failed to mount /dev/shm");
+    } else {
+        debug!("Mounted /dev/shm");
+    }
+
+    // Mount /dev/mqueue - needed for POSIX message queues
+    let _ = fs::create_dir_all("/dev/mqueue");
+    if let Err(e) = mount::<str, str, str, str>(
+        Some("mqueue"),
+        "/dev/mqueue",
+        Some("mqueue"),
+        MsFlags::empty(),
+        None,
+    ) {
+        warn!(error = %e, "Failed to mount /dev/mqueue");
+    } else {
+        debug!("Mounted /dev/mqueue");
+    }
+
     // Mount tmpfs
     if let Err(e) =
         mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None)
@@ -155,6 +233,118 @@ fn setup_filesystems() -> Result<(), InitError> {
 
     info!("API filesystems mounted");
     Ok(())
+}
+
+/// Mount persistent storage disk for container and kubelet data.
+/// Without this, all container images and state live on the rootfs (RAM),
+/// which quickly fills up and causes DiskPressure.
+fn setup_persistent_storage() {
+    use std::process::Command;
+
+    let data_mount = "/data";
+
+    // Create mount point
+    let _ = std::fs::create_dir_all(data_mount);
+
+    // Try candidate devices in order of preference
+    let candidates = ["/dev/sda4", "/dev/sda"];
+    let mut mounted = false;
+
+    for dev in &candidates {
+        if !std::path::Path::new(dev).exists() {
+            debug!(device = dev, "Device not found, skipping");
+            continue;
+        }
+
+        info!(device = dev, "Trying to mount persistent storage");
+
+        // First, try mounting directly (already formatted)
+        match mount::<str, str, str, str>(
+            Some(dev),
+            data_mount,
+            Some("ext4"),
+            MsFlags::empty(),
+            None,
+        ) {
+            Ok(()) => {
+                info!(
+                    device = dev,
+                    mount = data_mount,
+                    "Mounted persistent storage"
+                );
+                mounted = true;
+                break;
+            }
+            Err(_) => {
+                // Mount failed, try formatting first
+                info!(device = dev, "Formatting device with ext4");
+                let format_result = Command::new("/sbin/mkfs.ext4").args(["-F", dev]).output();
+
+                match format_result {
+                    Ok(output) if output.status.success() => {
+                        info!(device = dev, "Formatted successfully");
+                        // Try mount again after formatting
+                        match mount::<str, str, str, str>(
+                            Some(dev),
+                            data_mount,
+                            Some("ext4"),
+                            MsFlags::empty(),
+                            None,
+                        ) {
+                            Ok(()) => {
+                                info!(
+                                    device = dev,
+                                    mount = data_mount,
+                                    "Mounted persistent storage after formatting"
+                                );
+                                mounted = true;
+                                break;
+                            }
+                            Err(e) => {
+                                warn!(device = dev, error = %e, "Failed to mount after formatting")
+                            }
+                        }
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        warn!(device = dev, stderr = %stderr, "mkfs.ext4 failed");
+                    }
+                    Err(e) => warn!(device = dev, error = %e, "Failed to run mkfs.ext4"),
+                }
+            }
+        }
+    }
+
+    if !mounted {
+        warn!("No persistent storage available. Container data will use rootfs (RAM).");
+        return;
+    }
+
+    // Bind-mount key directories to persistent storage
+    let bind_dirs = [
+        ("containerd", "/var/lib/containerd"),
+        ("kubelet", "/var/lib/kubelet"),
+        ("keel", "/var/lib/keel"),
+    ];
+
+    for (subdir, target) in &bind_dirs {
+        let source = format!("{}/{}", data_mount, subdir);
+        let _ = std::fs::create_dir_all(&source);
+        let _ = std::fs::create_dir_all(target);
+
+        match mount::<str, str, str, str>(
+            Some(source.as_str()),
+            *target,
+            None,
+            MsFlags::MS_BIND,
+            None,
+        ) {
+            Ok(()) => info!(source = %source, target = target, "Bind-mounted persistent storage"),
+            Err(e) => warn!(source = %source, target = target, error = %e, "Failed to bind-mount"),
+        }
+    }
+
+    info!("Persistent storage setup complete");
 }
 
 /// Configure networking based on saved configuration or DHCP fallback
@@ -174,6 +364,33 @@ fn setup_networking() {
             debug!(error = %e, "No network configuration found, using DHCP fallback");
             // Fallback to DHCP on eth0 (QEMU default primary interface)
             configure_dhcp_fallback();
+        }
+    }
+
+    // Ensure /etc/resolv.conf exists - kubelet and other services need it for DNS.
+    // If configure_dns or configure_dhcp_fallback already created it, this is a no-op.
+    if !std::path::Path::new("/etc/resolv.conf").exists() {
+        info!("No /etc/resolv.conf found, creating default");
+        // Use common public DNS resolvers as a safe default
+        let default_resolv =
+            "# Generated by keel-init (default fallback)\nnameserver 8.8.8.8\nnameserver 1.1.1.1\n";
+        if let Err(e) = fs::write("/etc/resolv.conf", default_resolv) {
+            warn!(error = %e, "Failed to create /etc/resolv.conf");
+        }
+    }
+
+    // Ensure /etc/hosts exists - containerd needs it to generate pod sandbox hosts files
+    if !std::path::Path::new("/etc/hosts").exists() {
+        let hostname = nix::unistd::gethostname()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_else(|| "keelos".to_string());
+        let hosts_content = format!(
+            "# Generated by keel-init\n127.0.0.1\tlocalhost\n::1\t\tlocalhost\n127.0.1.1\t{}\n",
+            hostname
+        );
+        if let Err(e) = fs::write("/etc/hosts", hosts_content) {
+            warn!(error = %e, "Failed to create /etc/hosts");
         }
     }
 
@@ -439,6 +656,72 @@ fn configure_dhcp_fallback() {
     }
 }
 
+/// Set up the system hostname
+fn setup_hostname() {
+    // Try /etc/hostname first
+    if let Ok(hostname) = fs::read_to_string("/etc/hostname") {
+        let hostname = hostname.trim().to_string();
+        if !hostname.is_empty() {
+            if let Err(e) = nix::unistd::sethostname(&hostname) {
+                warn!(error = %e, hostname = %hostname, "Failed to set hostname");
+            } else {
+                info!(hostname = %hostname, "Hostname set from /etc/hostname");
+                return;
+            }
+        }
+    }
+
+    // Try kernel command line (hostname=xxx)
+    if let Ok(cmdline) = fs::read_to_string("/proc/cmdline") {
+        for param in cmdline.split_whitespace() {
+            if let Some(hostname) = param.strip_prefix("hostname=") {
+                let hostname = hostname.trim().to_string();
+                if !hostname.is_empty() {
+                    if let Err(e) = nix::unistd::sethostname(&hostname) {
+                        warn!(error = %e, hostname = %hostname, "Failed to set hostname from cmdline");
+                    } else {
+                        info!(hostname = %hostname, "Hostname set from kernel cmdline");
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Generate a hostname from machine-id or random
+    let hostname = format!("keelos-{}", &uuid_like_id()[..8]);
+    if let Err(e) = nix::unistd::sethostname(&hostname) {
+        warn!(error = %e, hostname = %hostname, "Failed to set generated hostname");
+    } else {
+        info!(hostname = %hostname, "Hostname set (generated)");
+    }
+}
+
+/// Generate a simple unique ID string from machine-id or /dev/urandom
+fn uuid_like_id() -> String {
+    // Try machine-id first
+    if let Ok(id) = fs::read_to_string("/etc/machine-id") {
+        let id = id.trim().to_string();
+        if !id.is_empty() {
+            return id;
+        }
+    }
+
+    // Fall back to reading a small number of random bytes
+    // NOTE: Do NOT use fs::read("/dev/urandom") - it tries to read the entire
+    // infinite device and causes an OOM kernel panic!
+    use std::io::Read;
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let mut buf = [0u8; 16];
+        if f.read_exact(&mut buf).is_ok() {
+            return buf.iter().map(|b| format!("{:02x}", b)).collect();
+        }
+    }
+
+    // Last resort
+    "00000000".to_string()
+}
+
 /// Check for test mode flags in kernel cmdline
 fn check_test_mode() {
     let cmdline = match fs::read_to_string("/proc/cmdline") {
@@ -450,6 +733,41 @@ fn check_test_mode() {
     };
 
     debug!(cmdline = %cmdline.trim(), "Kernel command line");
+
+    if cmdline.contains("test_cni=1") {
+        info!("TEST MODE: Installing static bridge CNI config");
+        // In test environments (QEMU SLIRP), kindnet can't route between Docker and
+        // SLIRP networks. A static bridge CNI gives kubelet a working local CNI.
+        let cni_config = r#"{
+  "cniVersion": "0.3.1",
+  "name": "bridge",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "cni0",
+      "isGateway": true,
+      "ipMasq": true,
+      "ipam": {
+        "type": "host-local",
+        "subnet": "10.244.1.0/24",
+        "routes": [{"dst": "0.0.0.0/0"}]
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {"portMappings": true}
+    }
+  ]
+}
+"#;
+        if let Err(e) = fs::create_dir_all("/etc/cni/net.d") {
+            warn!(error = %e, "Failed to create /etc/cni/net.d");
+        }
+        match fs::write("/etc/cni/net.d/10-bridge.conflist", cni_config) {
+            Ok(_) => info!("Static bridge CNI config installed"),
+            Err(e) => warn!(error = %e, "Failed to write CNI config"),
+        }
+    }
 
     if cmdline.contains("test_update=1") {
         info!("TEST MODE: Triggering self-update in 15 seconds");
@@ -481,7 +799,19 @@ fn setup_cgroups() {
         None,
     ) {
         Ok(_) => debug!("Mounted cgroup v2 at /sys/fs/cgroup"),
-        Err(e) => warn!(error = %e, "Failed to mount cgroup v2"),
+        Err(e) => {
+            warn!(error = %e, "Failed to mount cgroup v2");
+            return;
+        }
+    }
+
+    // Enable cgroup v2 controllers in the root cgroup.
+    // Without this, sub-cgroups (e.g. kubepods/) won't have controller interface files
+    // like cpu.max, memory.max, etc., causing runc container creation to fail.
+    let controllers = "+cpu +memory +io +pids +cpuset";
+    match fs::write("/sys/fs/cgroup/cgroup.subtree_control", controllers) {
+        Ok(_) => info!("Enabled cgroup v2 controllers: {}", controllers),
+        Err(e) => warn!(error = %e, "Failed to enable cgroup v2 controllers"),
     }
 }
 
@@ -493,6 +823,8 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
         return None;
     }
 
+    info!(service = name, path = path, args = ?args, "Spawning service");
+
     let mut cmd = Command::new(path);
     cmd.args(args)
         .stdout(Stdio::inherit())
@@ -500,11 +832,15 @@ fn spawn_service(name: &str, path: &str, args: &[&str]) -> Option<Child> {
 
     match cmd.spawn() {
         Ok(child) => {
-            info!(service = name, pid = child.id(), "Service started");
+            info!(
+                service = name,
+                pid = child.id(),
+                "✅ Service started successfully"
+            );
             Some(child)
         }
         Err(e) => {
-            error!(service = name, error = %e, "Failed to spawn service");
+            error!(service = name, path = path, args = ?args, error = %e, "❌ Failed to spawn service");
             None
         }
     }
@@ -544,13 +880,70 @@ fn spawn_kubelet() -> Option<Child> {
         "/usr/bin/kubelet"
     };
 
-    // Check if kubeconfig exists (set during bootstrap)
-    let kubeconfig_path = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
-    let mut args = vec!["--config=/etc/kubernetes/kubelet-config.yaml", "--v=2"];
+    // Ensure kubelet directories exist
+    let _ = fs::create_dir_all("/var/lib/kubelet/pki");
+    let _ = fs::create_dir_all("/var/lib/kubelet");
 
-    if std::path::Path::new(kubeconfig_path).exists() {
-        info!(path = kubeconfig_path, "Using kubeconfig for kubelet");
-        args.push("--kubeconfig=/var/lib/keel/kubernetes/kubelet.kubeconfig");
+    // Check if kubeconfig exists (set during bootstrap)
+    let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+    let kubeconfig_path = "/var/lib/kubelet/kubeconfig"; // Permanent kubeconfig after CSR
+    let mut args = vec![
+        "--config=/etc/kubernetes/kubelet-config.yaml",
+        "--cert-dir=/var/lib/kubelet/pki",
+        "--v=2",
+    ];
+
+    // Set hostname override to ensure kubelet uses valid node name
+    // Priority:
+    // 1. Node name from bootstrap config (if bootstrapped)
+    // 2. System hostname (if set)
+    // 3. Generated fallback
+    let bootstrap_config_path = "/var/lib/keel/kubernetes/bootstrap.json";
+    let hostname =
+        if let Ok(config) = keel_config::bootstrap::BootstrapConfig::load(bootstrap_config_path) {
+            info!(node_name = %config.node_name, "Using node name from bootstrap configuration");
+            config.node_name
+        } else {
+            nix::unistd::gethostname()
+                .ok()
+                .and_then(|h| h.into_string().ok())
+                .unwrap_or_default()
+        };
+
+    let hostname_arg = if !hostname.is_empty() && hostname != "(none)" && hostname != "localhost" {
+        Some(format!("--hostname-override={}", hostname))
+    } else {
+        // Generate a fallback node name
+        let fallback = format!("keelos-node-{}", &uuid_like_id()[..8]);
+        Some(format!("--hostname-override={}", fallback))
+    };
+    if let Some(ref arg) = hostname_arg {
+        args.push(arg);
+    }
+
+    // Bootstrap flow:
+    // 1. If bootstrap kubeconfig exists but permanent doesn't -> initial bootstrap
+    // 2. If permanent kubeconfig exists -> already joined, use permanent
+    // 3. If neither exists -> standalone mode
+    if std::path::Path::new(bootstrap_kubeconfig).exists() {
+        if !std::path::Path::new(kubeconfig_path).exists() {
+            // Initial bootstrap - kubelet will use bootstrap token to generate CSR
+            info!(
+                bootstrap_path = bootstrap_kubeconfig,
+                target_path = kubeconfig_path,
+                "Using bootstrap kubeconfig for initial cluster join"
+            );
+            args.push("--bootstrap-kubeconfig=/var/lib/keel/kubernetes/kubelet.kubeconfig");
+            args.push("--kubeconfig=/var/lib/kubelet/kubeconfig");
+        } else {
+            // Already bootstrapped - use permanent kubeconfig
+            info!(path = kubeconfig_path, "Using permanent kubeconfig");
+            args.push("--kubeconfig=/var/lib/kubelet/kubeconfig");
+        }
+    } else if std::path::Path::new(kubeconfig_path).exists() {
+        // Only permanent kubeconfig exists
+        info!(path = kubeconfig_path, "Using permanent kubeconfig");
+        args.push("--kubeconfig=/var/lib/kubelet/kubeconfig");
     } else {
         debug!("No kubeconfig found - kubelet will run in standalone mode");
     }
@@ -558,19 +951,72 @@ fn spawn_kubelet() -> Option<Child> {
     spawn_service("kubelet", kubelet_path, &args)
 }
 
+/// Import pre-loaded container images from known locations into containerd
+/// This ensures images like the pause container are available without network access
+fn import_preloaded_images() {
+    // Check multiple locations for pre-loaded images:
+    // 1. /usr/share/keel/images/ - bundled in the initramfs (e.g., pause image)
+    // 2. /data/images/ - pre-populated on the data partition (e.g., kube-proxy, kindnet)
+    let image_dirs = ["/usr/share/keel/images", "/data/images"];
+
+    for images_dir in &image_dirs {
+        info!(dir = images_dir, "Scanning for pre-loaded container images");
+        let entries = match fs::read_dir(images_dir) {
+            Ok(entries) => entries,
+            Err(e) => {
+                info!(dir = images_dir, error = %e, "Pre-loaded images directory not found");
+                continue;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("tar") {
+                let path_str = path.to_string_lossy();
+                let file_size = fs::metadata(&*path_str).map(|m| m.len()).unwrap_or(0);
+                info!(image = %path_str, size_bytes = file_size, "Importing pre-loaded container image");
+                match Command::new("/usr/bin/ctr")
+                    .args(["-n", "k8s.io", "images", "import", &path_str])
+                    .output()
+                {
+                    Ok(output) if output.status.success() => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        info!(image = %path_str, stdout = %stdout, "Successfully imported container image");
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        warn!(image = %path_str, stderr = %stderr, stdout = %stdout, "Failed to import container image");
+                    }
+                    Err(e) => {
+                        warn!(image = %path_str, error = %e, "Failed to run ctr images import");
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Main supervision loop for system services
 fn supervise_services() -> Result<(), InitError> {
-    // Start containerd
-    info!("Starting containerd");
-    let mut containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
-
-    // Start keel-agent
+    // Start keel-agent first - it handles bootstrap
     info!("Starting keel-agent");
     let mut agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
 
-    // Start kubelet (with override support and kubeconfig)
+    // Start container services immediately
+    // If bootstrap kubeconfig exists, kubelet will use it for cluster join
+    // If not, kubelet runs in standalone mode and will be restarted when bootstrap completes
+    info!("Starting containerd");
+    let mut containerd: Option<Child> = spawn_service("containerd", "/usr/bin/containerd", &[]);
+
+    // Give containerd a moment to initialize its socket
+    thread::sleep(time::Duration::from_secs(2));
+
+    // Import pre-loaded container images (e.g., pause image for pod sandboxes)
+    import_preloaded_images();
+
     info!("Starting kubelet");
-    let mut kubelet = spawn_kubelet();
+    let mut kubelet: Option<Child> = spawn_kubelet();
 
     // Track restart counts for backoff
     let mut agent_restart_count: u32 = 0;
@@ -621,19 +1067,58 @@ fn supervise_services() -> Result<(), InitError> {
             }
         }
 
-        // Check for kubelet restart signal (from bootstrap)
-        if Path::new("/run/keel/restart-kubelet").exists() {
+        // Check for bootstrap kubeconfig to start or restart services
+        let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+        let permanent_kubeconfig = "/var/lib/kubelet/kubeconfig";
+        let bootstrap_exists = std::path::Path::new(bootstrap_kubeconfig).exists();
+        let permanent_exists = std::path::Path::new(permanent_kubeconfig).exists();
+
+        // If bootstrap kubeconfig has just appeared and kubelet isn't configured for it,
+        // restart kubelet to pick up the bootstrap configuration
+        if bootstrap_exists && kubelet.is_none() {
+            info!("Bootstrap kubeconfig detected - restarting kubelet with cluster config");
+            kubelet = spawn_kubelet();
+        }
+
+        // Handle explicit restart signal or permanent kubeconfig appearing
+        let should_restart = if std::path::Path::new("/run/keel/restart-kubelet").exists() {
+            // Explicit restart signal from keel-agent
             info!("Kubelet restart signal detected");
-            // Kill existing kubelet if running
-            if let Some(mut child) = kubelet {
-                info!("Stopping kubelet for restart");
-                let _ = child.kill();
-                let _ = child.wait(); // Clean up zombie
+            true // Restart regardless of whether kubelet is running
+        } else if bootstrap_exists && permanent_exists && kubelet.is_some() {
+            // Permanent kubeconfig appeared - kubelet successfully bootstrapped
+            // Restart to switch from bootstrap to permanent kubeconfig
+            static SWITCHED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !SWITCHED.load(std::sync::atomic::Ordering::Relaxed) {
+                info!("Permanent kubeconfig detected - restarting kubelet to use it");
+                SWITCHED.store(true, std::sync::atomic::Ordering::Relaxed);
+                true
+            } else {
+                false
             }
-            // Remove signal file
+        } else {
+            false
+        };
+
+        // Restart kubelet if signal detected or kubeconfig changed
+        if should_restart {
+            if let Some(ref mut child) = kubelet {
+                info!(pid = child.id(), "Stopping kubelet for restart");
+                let _ = child.kill();
+                let _ = child.wait();
+                info!("Kubelet process stopped, preparing to respawn");
+            }
             let _ = fs::remove_file("/run/keel/restart-kubelet");
             // Restart kubelet with new configuration
+            info!("Calling spawn_kubelet() to restart with updated config");
             kubelet = spawn_kubelet();
+            if let Some(ref child) = kubelet {
+                info!(pid = child.id(), "✅ Kubelet successfully restarted");
+            } else {
+                error!("⚠️  CRITICAL: spawn_kubelet() returned None - kubelet failed to restart!");
+                error!("This means kubelet will not join the cluster. Check logs above for spawn errors.");
+            }
         }
 
         thread::sleep(time::Duration::from_secs(5));

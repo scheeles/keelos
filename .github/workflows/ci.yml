@@ -97,9 +97,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/kernel
-          key: ${{ runner.os }}-kernel-build-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/kernel-config') }}
-          restore-keys: |
-            ${{ runner.os }}-kernel-build-
+          key: ${{ runner.os }}-kernel-build-v2-${{ hashFiles('tools/builder/kernel-build.sh') }}
 
       - name: Build Builder Image
         uses: docker/build-push-action@v6
@@ -126,6 +124,14 @@ jobs:
             --privileged \
             keelos-builder:latest \
             /keelos/tools/ci-build-only.sh
+
+      - name: Free Disk Space
+        run: |
+          # Remove release target dir (only debug target needed for tests)
+          sudo rm -rf target/x86_64-unknown-linux-musl/release/deps target/x86_64-unknown-linux-musl/release/build || true
+          # Remove kernel source tree (large, no longer needed)
+          sudo rm -rf /tmp/kernel-build || true
+          df -h .
 
       - name: Run Unit Tests
         run: |

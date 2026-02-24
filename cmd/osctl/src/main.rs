@@ -200,16 +200,27 @@ async fn connect_with_auto_tls(
         // Create TLS identity
         let identity = tonic::transport::Identity::from_pem(cert_pem, key_pem);
 
-        // Configure TLS endpoint
+        // Configure TLS endpoint with timeout and keepalive
         let tls_endpoint = tonic::transport::Channel::from_shared(endpoint.to_string())?
-            .tls_config(tonic::transport::ClientTlsConfig::new().identity(identity))?;
+            .tls_config(tonic::transport::ClientTlsConfig::new().identity(identity))?
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .http2_keep_alive_interval(std::time::Duration::from_secs(10))
+            .keep_alive_timeout(std::time::Duration::from_secs(20));
 
         Ok(NodeServiceClient::connect(tls_endpoint).await?)
     } else {
-        // No certs found, use plain HTTP
+        // No certs found, use plain HTTP with timeout and keepalive
         eprintln!("ℹ️  No certificates found, using HTTP");
         eprintln!("💡 Run 'osctl init bootstrap --node <ip>' to enable mTLS");
-        Ok(NodeServiceClient::connect(endpoint.to_string()).await?)
+        let channel = tonic::transport::Channel::from_shared(endpoint.to_string())?
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .http2_keep_alive_interval(std::time::Duration::from_secs(10))
+            .keep_alive_timeout(std::time::Duration::from_secs(20))
+            .connect()
+            .await?;
+        Ok(NodeServiceClient::new(channel))
     }
 }
 

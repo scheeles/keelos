@@ -5,6 +5,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 KIND_CONFIG="${PROJECT_ROOT}/build/kind-config.yaml"
 CLUSTER_NAME="keel-test"
 
+# Use a dedicated kubeconfig to avoid macOS ~/.kube/config lock issues
+export KUBECONFIG="${PROJECT_ROOT}/build/keel-test.kubeconfig"
+
 echo ">>> Setting up Kind cluster for KeelOS bootstrap testing..."
 
 # Check if kind is installed
@@ -29,14 +32,18 @@ fi
 # Create build directory if it doesn't exist
 mkdir -p "${PROJECT_ROOT}/build"
 
+# Detect host's local IP address
+HOST_IP=$(ipconfig getifaddr en0 || ipconfig getifaddr en1 || echo "127.0.0.1")
+echo "Host IP detected: ${HOST_IP}"
+
 # Generate kind configuration
 echo "Generating kind configuration..."
 cat > "${KIND_CONFIG}" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
-  apiServerAddress: "127.0.0.1"
   apiServerPort: 6443
+  disableDefaultCNI: true
 nodes:
 - role: control-plane
   kubeadmConfigPatches:
@@ -47,16 +54,71 @@ nodes:
       - "localhost"
       - "127.0.0.1"
       - "10.0.2.2"
+      - "${HOST_IP}"
 EOF
 
 echo "Creating kind cluster '${CLUSTER_NAME}'..."
-kind create cluster --name "${CLUSTER_NAME}" --config "${KIND_CONFIG}"
+kind create cluster --name "${CLUSTER_NAME}" --config "${KIND_CONFIG}" --kubeconfig "${KUBECONFIG}"
+
+# Install static bridge CNI config on control plane
+# (kindnet is disabled since it can't route between Docker and QEMU networks)
+echo ">>> Installing bridge CNI on control plane..."
+docker exec "${CLUSTER_NAME}-control-plane" mkdir -p /etc/cni/net.d
+docker exec "${CLUSTER_NAME}-control-plane" sh -c 'cat > /etc/cni/net.d/10-bridge.conflist << CNIEOF
+{
+  "cniVersion": "0.3.1",
+  "name": "bridge",
+  "plugins": [
+    {
+      "type": "bridge",
+      "bridge": "cni0",
+      "isGateway": true,
+      "ipMasq": true,
+      "ipam": {
+        "type": "host-local",
+        "subnet": "10.244.0.0/24",
+        "routes": [{"dst": "0.0.0.0/0"}]
+      }
+    },
+    {
+      "type": "portmap",
+      "capabilities": {"portMappings": true}
+    }
+  ]
+}
+CNIEOF'
+echo ">>> Bridge CNI installed on control plane"
+
+echo ">>> Cluster created. Configuring RBAC for node bootstrap..."
+
+# Allow bootstrap tokens to create CSRs
+echo ">>> Granting CSR creation permissions to bootstrap tokens..."
+kubectl create clusterrolebinding kubeadm:kubelet-bootstrap \
+    --clusterrole=system:node-bootstrapper \
+    --group=system:bootstrappers 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+# Auto-approve kubelet serving certificates
+echo ">>> Configuring auto-approval for kubelet certificates..."
+kubectl create clusterrolebinding auto-approve-csrs-for-group \
+    --clusterrole=system:certificates.k8s.io:certificatesigningrequests:nodeclient \
+    --group=system:bootstrappers 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+kubectl create clusterrolebinding auto-approve-renewals-for-nodes \
+    --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeclient \
+    --group=system:nodes 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+kubectl create clusterrolebinding auto-approve-serving-for-nodes \
+    --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeclient \
+    --group=system:nodes 2>/dev/null || echo "ClusterRoleBinding already exists"
+
+echo ">>> Kind cluster is ready for node bootstrapping"
 
 echo "Waiting for cluster to be ready..."
 kubectl wait --for=condition=Ready nodes --all --timeout=60s
 
+# The following RBAC rules are now redundant as they have been moved and renamed above.
 # Create RBAC for bootstrap tokens (idempotent)
-echo "Creating RBAC for bootstrap tokens..."
+# echo "Creating RBAC for bootstrap tokens..."
 
 # Create ClusterRoleBinding for system:node-bootstrapper
 kubectl create clusterrolebinding kubeadm:kubelet-bootstrap \

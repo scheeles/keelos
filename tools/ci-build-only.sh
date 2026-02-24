@@ -36,4 +36,10 @@ echo ">>> Building ISO..."
 echo ">>> Setting up test disk..."
 ./tools/testing/setup-test-disk.sh
 
+# 6. Free disk space - release artifacts already copied to build/
+echo ">>> Cleaning up build artifacts to free disk space..."
+rm -rf /keelos/target/x86_64-unknown-linux-musl/release/deps
+rm -rf /keelos/target/x86_64-unknown-linux-musl/release/build
+rm -rf /keelos/target/x86_64-unknown-linux-musl/release/.fingerprint
+
 echo ">>> Build Complete! Artifacts ready for testing."
