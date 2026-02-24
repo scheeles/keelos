@@ -41,6 +41,12 @@ TESTS_FAILED=0
 # Each test uses a unique port to avoid stale port state from previous QEMU instances
 NEXT_PORT=50060
 
+# Cleanup trap to remove temporary disk images on exit
+cleanup() {
+    rm -f "${BUILD_DIR}"/sda-diag-*.img 2>/dev/null || true
+}
+trap cleanup EXIT
+
 # Helper function to start QEMU
 start_qemu() {
     local test_name="$1"
@@ -69,7 +75,9 @@ start_qemu() {
 
         if [ $elapsed -ge $TIMEOUT ]; then
             echo -e "${RED}[${test_name}] FAIL: Boot timeout${NC}"
-            kill -9 $QEMU_PID 2>/dev/null
+            kill $QEMU_PID 2>/dev/null || true
+            sleep 1
+            kill -9 $QEMU_PID 2>/dev/null || true
             return 1
         fi
 
@@ -113,6 +121,8 @@ start_qemu() {
 stop_qemu() {
     local test_name="$1"
     echo "[${test_name}] Stopping QEMU (PID: ${QEMU_PID})"
+    kill $QEMU_PID 2>/dev/null || true
+    sleep 1
     kill -9 $QEMU_PID 2>/dev/null || true
     wait $QEMU_PID 2>/dev/null || true
     # Clean up per-test disk image copy
