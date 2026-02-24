@@ -32,26 +32,28 @@ Use KeelOS-specific terms consistently:
 
 | Directory | Purpose |
 |-----------|---------|
-| `/kernel` | Minimalist Linux kernel configuration and patches |
-| `/pkg` | Shared Rust/Go libraries for OS components |
 | `/cmd` | Binaries: `keel-init`, `keel-agent`, `osctl` |
-| `/crates` | Rust workspace crates |
-| `/system` | Static manifests and bootstrap configuration |
-| `/tools` | Build systems and test harnesses |
+| `/pkg` | Shared Rust library crates (`api`, `config`, `crypto`) |
+| `/tools` | Build scripts and test harnesses |
 | `/docs` | End-user documentation |
-| `/.ai-context` | Developer guidelines and style rules |
+| `/k8s` | Kubernetes RBAC manifests for cluster integration |
+| `/.github` | CI/CD workflows and PR templates |
 
 ## Critical Rules
 
 1. **No Panics in PID 1**: The `keel-init` binary is PID 1 and **must never panic**. Always use `Result<T, E>` with proper error handling.
 2. **Memory Safety**: All system components (PID 1, Agent) are written in **Rust**. Tooling may use Go.
 3. **Minimal Dependencies**: Audit every crate. Prefer `std` where possible.
-4. **Static Linking**: All binaries must be statically linked using `x86_64-unknown-linux-musl`.
+4. **Static Linking**: All OS image binaries target `x86_64-unknown-linux-musl`. `osctl` additionally ships `aarch64-unknown-linux-musl`, `armv7-unknown-linux-musleabihf`, and `x86_64-pc-windows-gnu` builds via `cross`.
 5. **Containerized Builds**: All builds must run inside a container for reproducibility:
    ```bash
    ./tools/builder/build.sh
    ```
-6. **Feature Branches**: Never commit directly to `main`. Create feature branches and submit PRs.
+6. **Feature Branches**: Never commit directly to `main`. Create feature branches using the naming convention below and submit PRs:
+   - `feat/<short-description>` — New features
+   - `fix/<short-description>` — Bug fixes
+   - `docs/<short-description>` — Documentation-only changes
+   - `chore/<short-description>` — Maintenance (dependency bumps, CI)
 7. **Tests Required**: All new code requires unit tests. System changes require verification scripts in `tools/testing/`.
 
 ## Build & Test
@@ -60,11 +62,23 @@ Use KeelOS-specific terms consistently:
 # Build the OS image (runs in container)
 ./tools/builder/build.sh
 
+# Run unit tests
+cargo test --workspace
+
+# Run full lint suite (clippy + fmt, same checks as CI)
+./tools/lint.sh
+
 # Run in QEMU for testing
 ./tools/testing/run-qemu.sh
 
 # Run boot tests
 ./tools/testing/test-boot.sh
+
+# Run integration tests
+./tools/testing/test-integration.sh
+
+# Verify build artifacts
+./tools/testing/verify-artifacts.sh
 ```
 
 ## Coding Standards
@@ -84,10 +98,12 @@ Use KeelOS-specific terms consistently:
     - `unwrap_used` — Prevents `.unwrap()` calls
     - `expect_used` — Prevents `.expect()` calls
     - `panic` — Prevents explicit `panic!()` macros
+    - `todo!()`, `unimplemented!()`, and `unreachable!()` are also prohibited in runtime code — all panic
     - These are allowed in test code only
   - Must pass `cargo clippy --workspace -- -D warnings` (enforced in CI)
+- **Unsafe Code**: `unsafe_code` is set to `warn`. It is permitted only at syscall/FFI boundaries and must include a `// SAFETY:` comment explaining the invariants that make it correct.
 - **Error Handling**:
-  - ❌ `unwrap()` or `expect()` in runtime code (enforced by lints)
+  - ❌ `unwrap()`, `expect()`, `todo!()`, `unimplemented!()`, `unreachable!()` in runtime code
   - ✅ `?` operator or explicit matching
   - ✅ Proper error documentation with `/// # Errors`
 - **Running Lints Locally**:
@@ -169,7 +185,7 @@ Component-specific documentation lives in component `README.md` files (e.g., `/c
 
 ### Component Documentation
 
-- Every crate in `crates/` and significant tool in `tools/` must have a `README.md`.
+- Every crate in `pkg/` and `cmd/`, and significant tool in `tools/`, must have a `README.md`.
 - Include: **Overview**, **Build Instructions**, and **Usage Examples**.
 
 ### CLI User Experience
@@ -204,7 +220,7 @@ graph TD
 
 For `keel-agent` gRPC APIs:
 
-```markdown
+~~~markdown
 ### EndpointName
 
 Description of the endpoint.
@@ -219,6 +235,7 @@ Description of the endpoint.
 ```bash
 osctl command --flag value
 ```
+~~~
 
 ## GitHub Interactions
 
