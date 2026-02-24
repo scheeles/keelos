@@ -1,10 +1,12 @@
 use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
-    BootstrapKubernetesRequest, ConfigureNetworkRequest, DhcpConfig, DnsConfig,
-    GetBootstrapStatusRequest, GetHealthRequest, GetNetworkConfigRequest, GetNetworkStatusRequest,
-    GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest, InstallUpdateRequest,
-    NetworkInterface, RebootRequest, StaticConfig, TriggerRollbackRequest,
+    BootstrapKubernetesRequest, CollectCrashDumpRequest, ConfigureNetworkRequest,
+    CreateSystemSnapshotRequest, DhcpConfig, DnsConfig, EnableDebugModeRequest,
+    EnableRecoveryModeRequest, GetBootstrapStatusRequest, GetDebugStatusRequest, GetHealthRequest,
+    GetNetworkConfigRequest, GetNetworkStatusRequest, GetRollbackHistoryRequest, GetStatusRequest,
+    InitBootstrapRequest, InstallUpdateRequest, NetworkInterface, RebootRequest, StaticConfig,
+    StreamLogsRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -86,6 +88,11 @@ enum Commands {
     Network {
         #[command(subcommand)]
         action: NetworkAction,
+    },
+    /// Diagnostics and debugging commands
+    Diag {
+        #[command(subcommand)]
+        action: DiagAction,
     },
 }
 
@@ -179,6 +186,63 @@ enum InitMode {
     },
     /// Initialize with Kubernetes-signed operational certificate
     Kubeconfig,
+}
+
+#[derive(Subcommand)]
+enum DiagAction {
+    /// Enable time-limited debug mode
+    Debug {
+        /// Duration in seconds (max 3600, default 900)
+        #[arg(long, default_value_t = 900)]
+        duration: u32,
+        /// Reason for enabling debug mode
+        #[arg(long, default_value = "Manual debug via osctl")]
+        reason: String,
+    },
+    /// Get current debug mode status
+    DebugStatus,
+    /// Collect crash dump (kernel + userspace info)
+    CrashDump {
+        /// Include kernel crash data (dmesg)
+        #[arg(long, default_value_t = true)]
+        kernel: bool,
+        /// Include userspace process information
+        #[arg(long, default_value_t = true)]
+        userspace: bool,
+    },
+    /// Stream debug logs
+    Logs {
+        /// Filter by log level (debug, info, warn, error)
+        #[arg(long, default_value = "")]
+        level: String,
+        /// Filter by component name
+        #[arg(long, default_value = "")]
+        component: String,
+        /// Number of historical lines to include
+        #[arg(long, default_value_t = 50)]
+        tail: u32,
+    },
+    /// Create a system snapshot/backup
+    Snapshot {
+        /// Human-readable label for the snapshot
+        #[arg(long, default_value = "manual snapshot")]
+        label: String,
+        /// Include system configuration files
+        #[arg(long, default_value_t = true)]
+        config: bool,
+        /// Include logs
+        #[arg(long, default_value_t = true)]
+        logs: bool,
+    },
+    /// Enable emergency recovery mode
+    Recovery {
+        /// Duration in seconds (max 3600, default 900)
+        #[arg(long, default_value_t = 900)]
+        duration: u32,
+        /// Reason for enabling recovery mode
+        #[arg(long, default_value = "Manual recovery via osctl")]
+        reason: String,
+    },
 }
 
 /// Helper to create a TLS-enabled connection if certificates are available
@@ -658,6 +722,129 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             }
         }
+        Commands::Diag { action } => match action {
+            DiagAction::Debug { duration, reason } => {
+                let request = tonic::Request::new(EnableDebugModeRequest {
+                    duration_secs: *duration,
+                    reason: reason.clone(),
+                });
+
+                println!("🔧 Enabling debug mode...");
+                let response = client.enable_debug_mode(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                    println!("  Session ID: {}", result.session_id);
+                    println!("  Expires at: {}", result.expires_at);
+                } else {
+                    eprintln!("❌ {}", result.message);
+                    std::process::exit(1);
+                }
+            }
+            DiagAction::DebugStatus => {
+                let request = tonic::Request::new(GetDebugStatusRequest {});
+                let response = client.get_debug_status(request).await?;
+                let status = response.into_inner();
+
+                if status.enabled {
+                    println!("\n🔧 Debug Mode: ACTIVE");
+                    println!("  Session ID: {}", status.session_id);
+                    println!("  Reason: {}", status.reason);
+                    println!("  Expires at: {}", status.expires_at);
+                    println!("  Remaining: {}s", status.remaining_secs);
+                } else {
+                    println!("\n🔧 Debug Mode: INACTIVE");
+                }
+            }
+            DiagAction::CrashDump { kernel, userspace } => {
+                let request = tonic::Request::new(CollectCrashDumpRequest {
+                    include_kernel: *kernel,
+                    include_userspace: *userspace,
+                });
+
+                println!("📦 Collecting crash dump...");
+                let response = client.collect_crash_dump(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                    println!("  Path: {}", result.dump_path);
+                    let kb = result.dump_size_bytes as f64 / 1024.0;
+                    println!("  Size: {kb:.2} KB");
+                    println!("  Created: {}", result.created_at);
+                } else {
+                    eprintln!("❌ {}", result.message);
+                    std::process::exit(1);
+                }
+            }
+            DiagAction::Logs {
+                level,
+                component,
+                tail,
+            } => {
+                let request = tonic::Request::new(StreamLogsRequest {
+                    level: level.clone(),
+                    component: component.clone(),
+                    tail_lines: *tail,
+                });
+
+                println!("📜 Streaming logs...\n");
+                let mut stream = client.stream_logs(request).await?.into_inner();
+                while let Some(entry) = stream.next().await {
+                    let entry = entry?;
+                    println!(
+                        "[{}] {} [{}] {}",
+                        entry.timestamp, entry.level, entry.component, entry.message
+                    );
+                }
+            }
+            DiagAction::Snapshot {
+                label,
+                config,
+                logs,
+            } => {
+                let request = tonic::Request::new(CreateSystemSnapshotRequest {
+                    label: label.clone(),
+                    include_config: *config,
+                    include_logs: *logs,
+                });
+
+                println!("📸 Creating system snapshot...");
+                let response = client.create_system_snapshot(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                    println!("  Snapshot ID: {}", result.snapshot_id);
+                    println!("  Path: {}", result.snapshot_path);
+                    let kb = result.size_bytes as f64 / 1024.0;
+                    println!("  Size: {kb:.2} KB");
+                    println!("  Created: {}", result.created_at);
+                } else {
+                    eprintln!("❌ {}", result.message);
+                    std::process::exit(1);
+                }
+            }
+            DiagAction::Recovery { duration, reason } => {
+                let request = tonic::Request::new(EnableRecoveryModeRequest {
+                    duration_secs: *duration,
+                    reason: reason.clone(),
+                });
+
+                println!("🚨 Enabling recovery mode...");
+                let response = client.enable_recovery_mode(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                    println!("  Expires at: {}", result.expires_at);
+                } else {
+                    eprintln!("❌ {}", result.message);
+                    std::process::exit(1);
+                }
+            }
+        },
     }
 
     Ok(())
@@ -808,6 +995,134 @@ mod tests {
             assert!(matches!(action, RollbackAction::History));
         } else {
             panic!("Expected Rollback command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_debug() {
+        let cli = Cli::try_parse_from(["osctl", "diag", "debug"]).unwrap();
+        if let Commands::Diag {
+            action: DiagAction::Debug { duration, reason },
+        } = cli.command
+        {
+            assert_eq!(duration, 900);
+            assert_eq!(reason, "Manual debug via osctl");
+        } else {
+            panic!("Expected Diag Debug command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_debug_custom() {
+        let cli = Cli::try_parse_from([
+            "osctl",
+            "diag",
+            "debug",
+            "--duration",
+            "600",
+            "--reason",
+            "investigating issue",
+        ])
+        .unwrap();
+        if let Commands::Diag {
+            action: DiagAction::Debug { duration, reason },
+        } = cli.command
+        {
+            assert_eq!(duration, 600);
+            assert_eq!(reason, "investigating issue");
+        } else {
+            panic!("Expected Diag Debug command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_debug_status() {
+        let cli = Cli::try_parse_from(["osctl", "diag", "debug-status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Diag {
+                action: DiagAction::DebugStatus
+            }
+        ));
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_crash_dump() {
+        let cli = Cli::try_parse_from(["osctl", "diag", "crash-dump"]).unwrap();
+        if let Commands::Diag {
+            action: DiagAction::CrashDump { kernel, userspace },
+        } = cli.command
+        {
+            assert!(kernel);
+            assert!(userspace);
+        } else {
+            panic!("Expected Diag CrashDump command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_logs() {
+        let cli =
+            Cli::try_parse_from(["osctl", "diag", "logs", "--level", "error", "--tail", "100"])
+                .unwrap();
+        if let Commands::Diag {
+            action:
+                DiagAction::Logs {
+                    level,
+                    component,
+                    tail,
+                },
+        } = cli.command
+        {
+            assert_eq!(level, "error");
+            assert!(component.is_empty());
+            assert_eq!(tail, 100);
+        } else {
+            panic!("Expected Diag Logs command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_snapshot() {
+        let cli =
+            Cli::try_parse_from(["osctl", "diag", "snapshot", "--label", "pre-upgrade"]).unwrap();
+        if let Commands::Diag {
+            action:
+                DiagAction::Snapshot {
+                    label,
+                    config,
+                    logs,
+                },
+        } = cli.command
+        {
+            assert_eq!(label, "pre-upgrade");
+            assert!(config);
+            assert!(logs);
+        } else {
+            panic!("Expected Diag Snapshot command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_recovery() {
+        let cli = Cli::try_parse_from([
+            "osctl",
+            "diag",
+            "recovery",
+            "--duration",
+            "1800",
+            "--reason",
+            "emergency repair",
+        ])
+        .unwrap();
+        if let Commands::Diag {
+            action: DiagAction::Recovery { duration, reason },
+        } = cli.command
+        {
+            assert_eq!(duration, 1800);
+            assert_eq!(reason, "emergency repair");
+        } else {
+            panic!("Expected Diag Recovery command");
         }
     }
 }

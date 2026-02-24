@@ -14,16 +14,19 @@
 use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
     BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
-    CancelScheduledUpdateResponse, ConfigureNetworkRequest, ConfigureNetworkResponse,
-    GetBootstrapStatusRequest, GetBootstrapStatusResponse, GetHealthRequest, GetHealthResponse,
-    GetNetworkConfigRequest, GetNetworkConfigResponse, GetNetworkStatusRequest,
+    CancelScheduledUpdateResponse, CollectCrashDumpRequest, CollectCrashDumpResponse,
+    ConfigureNetworkRequest, ConfigureNetworkResponse, CreateSystemSnapshotRequest,
+    CreateSystemSnapshotResponse, EnableDebugModeRequest, EnableDebugModeResponse,
+    EnableRecoveryModeRequest, EnableRecoveryModeResponse, GetBootstrapStatusRequest,
+    GetBootstrapStatusResponse, GetDebugStatusRequest, GetDebugStatusResponse, GetHealthRequest,
+    GetHealthResponse, GetNetworkConfigRequest, GetNetworkConfigResponse, GetNetworkStatusRequest,
     GetNetworkStatusResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
-    InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, RotateCertificateRequest,
-    RotateCertificateResponse, ScheduleUpdateRequest, ScheduleUpdateResponse,
-    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
-    UpdateSchedule as ProtoUpdateSchedule,
+    InstallUpdateRequest, LogEntry, RebootRequest, RebootResponse, RollbackEvent,
+    RotateCertificateRequest, RotateCertificateResponse, ScheduleUpdateRequest,
+    ScheduleUpdateResponse, StreamLogsRequest, TriggerRollbackRequest, TriggerRollbackResponse,
+    UpdateProgress, UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -34,6 +37,7 @@ use tracing::{debug, error, info, warn};
 
 mod cert_metrics;
 mod cert_renewal;
+mod diagnostics;
 mod disk;
 mod health;
 mod health_check;
@@ -44,6 +48,7 @@ mod network;
 mod telemetry;
 mod update_scheduler;
 
+use diagnostics::DiagnosticsManager;
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
 use mtls::TlsManager;
@@ -53,6 +58,7 @@ use update_scheduler::{ScheduleStatus, UpdateScheduler};
 pub struct HelperNodeService {
     scheduler: Arc<UpdateScheduler>,
     health_checker: Arc<HealthChecker>,
+    diagnostics: Arc<DiagnosticsManager>,
 }
 
 #[tonic::async_trait]
@@ -724,6 +730,235 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetNetworkStatusResponse>, Status> {
         network::get_network_status(request).await
     }
+
+    async fn enable_debug_mode(
+        &self,
+        request: Request<EnableDebugModeRequest>,
+    ) -> Result<Response<EnableDebugModeResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            reason = %req.reason,
+            duration_secs = req.duration_secs,
+            "Enable debug mode requested (audit)"
+        );
+
+        match self
+            .diagnostics
+            .enable_debug_mode(req.duration_secs, &req.reason)
+            .await
+        {
+            Ok(session) => Ok(Response::new(EnableDebugModeResponse {
+                success: true,
+                message: "Debug mode enabled".to_string(),
+                session_id: session.session_id,
+                expires_at: session.expires_at.to_rfc3339(),
+            })),
+            Err(e) => Ok(Response::new(EnableDebugModeResponse {
+                success: false,
+                message: e,
+                session_id: String::new(),
+                expires_at: String::new(),
+            })),
+        }
+    }
+
+    async fn get_debug_status(
+        &self,
+        _request: Request<GetDebugStatusRequest>,
+    ) -> Result<Response<GetDebugStatusResponse>, Status> {
+        debug!("Get debug status requested");
+
+        match self.diagnostics.get_debug_status().await {
+            Some(session) => {
+                let remaining = (session.expires_at - chrono::Utc::now()).num_seconds();
+                let remaining = if remaining > 0 { remaining as u32 } else { 0 };
+                Ok(Response::new(GetDebugStatusResponse {
+                    enabled: true,
+                    session_id: session.session_id,
+                    expires_at: session.expires_at.to_rfc3339(),
+                    reason: session.reason,
+                    remaining_secs: remaining,
+                }))
+            }
+            None => Ok(Response::new(GetDebugStatusResponse {
+                enabled: false,
+                session_id: String::new(),
+                expires_at: String::new(),
+                reason: String::new(),
+                remaining_secs: 0,
+            })),
+        }
+    }
+
+    async fn collect_crash_dump(
+        &self,
+        request: Request<CollectCrashDumpRequest>,
+    ) -> Result<Response<CollectCrashDumpResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            include_kernel = req.include_kernel,
+            include_userspace = req.include_userspace,
+            "Crash dump collection requested"
+        );
+
+        match diagnostics::collect_crash_dump(req.include_kernel, req.include_userspace) {
+            Ok((dump_path, dump_size)) => Ok(Response::new(CollectCrashDumpResponse {
+                success: true,
+                message: "Crash dump collected successfully".to_string(),
+                dump_path,
+                dump_size_bytes: dump_size,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            })),
+            Err(e) => Ok(Response::new(CollectCrashDumpResponse {
+                success: false,
+                message: format!("Failed to collect crash dump: {e}"),
+                dump_path: String::new(),
+                dump_size_bytes: 0,
+                created_at: String::new(),
+            })),
+        }
+    }
+
+    type StreamLogsStream = Pin<Box<dyn Stream<Item = Result<LogEntry, Status>> + Send>>;
+
+    async fn stream_logs(
+        &self,
+        request: Request<StreamLogsRequest>,
+    ) -> Result<Response<Self::StreamLogsStream>, Status> {
+        let req = request.into_inner();
+        let level_filter = req.level.clone();
+        let component_filter = req.component.clone();
+        let tail_lines = if req.tail_lines == 0 {
+            50
+        } else {
+            req.tail_lines
+        };
+
+        info!(
+            level = %level_filter,
+            component = %component_filter,
+            tail_lines = tail_lines,
+            "Log streaming requested"
+        );
+
+        // Collect log lines synchronously, then stream them
+        let dmesg_output = std::process::Command::new("dmesg")
+            .arg("--time-format=iso")
+            .output()
+            .map_err(|e| Status::internal(format!("Failed to read dmesg: {e}")))?;
+
+        let full_output = String::from_utf8_lossy(&dmesg_output.stdout).to_string();
+        let all_lines: Vec<String> = full_output.lines().map(String::from).collect();
+        let start = if all_lines.len() > tail_lines as usize {
+            all_lines.len() - tail_lines as usize
+        } else {
+            0
+        };
+        let selected_lines: Vec<String> = all_lines[start..].to_vec();
+
+        let output = async_stream::try_stream! {
+            for line in &selected_lines {
+                let entry = parse_log_line(line, &level_filter, &component_filter);
+                if let Some(entry) = entry {
+                    yield entry;
+                }
+            }
+        };
+
+        Ok(Response::new(Box::pin(output) as Self::StreamLogsStream))
+    }
+
+    async fn create_system_snapshot(
+        &self,
+        request: Request<CreateSystemSnapshotRequest>,
+    ) -> Result<Response<CreateSystemSnapshotResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            label = %req.label,
+            include_config = req.include_config,
+            include_logs = req.include_logs,
+            "System snapshot requested"
+        );
+
+        match diagnostics::create_system_snapshot(&req.label, req.include_config, req.include_logs)
+        {
+            Ok((snapshot_id, snapshot_path, size)) => {
+                Ok(Response::new(CreateSystemSnapshotResponse {
+                    success: true,
+                    message: "System snapshot created successfully".to_string(),
+                    snapshot_id,
+                    snapshot_path,
+                    size_bytes: size,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                }))
+            }
+            Err(e) => Ok(Response::new(CreateSystemSnapshotResponse {
+                success: false,
+                message: format!("Failed to create snapshot: {e}"),
+                snapshot_id: String::new(),
+                snapshot_path: String::new(),
+                size_bytes: 0,
+                created_at: String::new(),
+            })),
+        }
+    }
+
+    async fn enable_recovery_mode(
+        &self,
+        request: Request<EnableRecoveryModeRequest>,
+    ) -> Result<Response<EnableRecoveryModeResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(
+            reason = %req.reason,
+            duration_secs = req.duration_secs,
+            "Enable recovery mode requested (audit)"
+        );
+
+        match self
+            .diagnostics
+            .enable_recovery_mode(req.duration_secs, &req.reason)
+            .await
+        {
+            Ok(session) => Ok(Response::new(EnableRecoveryModeResponse {
+                success: true,
+                message: format!("Recovery mode enabled (reason: {})", session.reason),
+                expires_at: session.expires_at.to_rfc3339(),
+            })),
+            Err(e) => Ok(Response::new(EnableRecoveryModeResponse {
+                success: false,
+                message: e,
+                expires_at: String::new(),
+            })),
+        }
+    }
+}
+
+/// Parse a raw log line and apply filters.
+/// Returns `None` if the line doesn't match filters.
+fn parse_log_line(line: &str, level_filter: &str, component_filter: &str) -> Option<LogEntry> {
+    // Simple parsing: dmesg lines are like "2024-01-01T00:00:00,000000+00:00 component: message"
+    let entry = LogEntry {
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        level: "info".to_string(),
+        component: "kernel".to_string(),
+        message: line.to_string(),
+    };
+
+    // Apply level filter if specified
+    if !level_filter.is_empty() && entry.level != level_filter {
+        return None;
+    }
+
+    // Apply component filter if specified
+    if !component_filter.is_empty() && entry.component != component_filter {
+        return None;
+    }
+
+    Some(entry)
 }
 
 /// Initialize operational certificates if running in Kubernetes
@@ -813,6 +1048,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_config = HealthCheckerConfig::default();
     let health_checker = Arc::new(HealthChecker::new(health_config));
 
+    // Initialize diagnostics manager
+    let diagnostics = Arc::new(DiagnosticsManager::new());
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
     tokio::spawn(async move {
@@ -822,6 +1060,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_service = HelperNodeService {
         scheduler: scheduler.clone(),
         health_checker: health_checker.clone(),
+        diagnostics,
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
@@ -1090,21 +1329,71 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
 mod tests {
     use super::*;
     use keel_api::node::node_service_server::NodeService;
-    use keel_api::node::GetStatusRequest;
+    use keel_api::node::{EnableDebugModeRequest, GetDebugStatusRequest, GetStatusRequest};
+
+    fn make_test_service() -> HelperNodeService {
+        HelperNodeService {
+            scheduler: Arc::new(UpdateScheduler::new("/tmp/test-schedules.json")),
+            health_checker: Arc::new(HealthChecker::new(HealthCheckerConfig::default())),
+            diagnostics: Arc::new(DiagnosticsManager::new()),
+        }
+    }
 
     #[tokio::test]
     async fn test_get_status() {
-        let scheduler = Arc::new(UpdateScheduler::new("/tmp/test-schedules.json"));
-        let health_checker = Arc::new(HealthChecker::new(HealthCheckerConfig::default()));
-        let service = HelperNodeService {
-            scheduler,
-            health_checker,
-        };
+        let service = make_test_service();
         let request = tonic::Request::new(GetStatusRequest {});
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
 
         assert_eq!(inner.hostname, "keel-node");
         assert_eq!(inner.os_version, "0.1.0");
+    }
+
+    #[tokio::test]
+    async fn test_enable_debug_mode_via_grpc() {
+        let service = make_test_service();
+        let request = tonic::Request::new(EnableDebugModeRequest {
+            duration_secs: 300,
+            reason: "testing diagnostics".to_string(),
+        });
+        let response = service.enable_debug_mode(request).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(inner.success);
+        assert!(!inner.session_id.is_empty());
+        assert!(!inner.expires_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_debug_status_inactive() {
+        let service = make_test_service();
+        let request = tonic::Request::new(GetDebugStatusRequest {});
+        let response = service.get_debug_status(request).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(!inner.enabled);
+        assert!(inner.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_debug_status_after_enable() {
+        let service = make_test_service();
+
+        // Enable debug mode
+        let enable_req = tonic::Request::new(EnableDebugModeRequest {
+            duration_secs: 300,
+            reason: "test".to_string(),
+        });
+        let _ = service.enable_debug_mode(enable_req).await.unwrap();
+
+        // Check status
+        let status_req = tonic::Request::new(GetDebugStatusRequest {});
+        let response = service.get_debug_status(status_req).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(inner.enabled);
+        assert!(!inner.session_id.is_empty());
+        assert!(inner.remaining_secs > 0);
     }
 }
