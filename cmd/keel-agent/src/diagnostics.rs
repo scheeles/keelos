@@ -40,6 +40,12 @@ pub struct DiagnosticsManager {
     recovery_session: Arc<RwLock<Option<RecoverySession>>>,
 }
 
+impl Default for DiagnosticsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiagnosticsManager {
     /// Creates a new `DiagnosticsManager`.
     pub fn new() -> Self {
@@ -354,6 +360,116 @@ fn create_system_snapshot_to(
     Ok((snapshot_id, snapshot_path, size))
 }
 
+/// A single finding produced by crash dump analysis.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CrashFinding {
+    /// Severity: "critical", "error", "warning", "info"
+    pub severity: &'static str,
+    /// Machine-readable type, e.g. "oom_kill", "kernel_panic"
+    pub finding_type: &'static str,
+    /// Human-readable description
+    pub message: String,
+}
+
+/// Analyzes a previously collected crash dump file.
+///
+/// Reads `dump_path`, scans for known failure patterns (OOM kills, kernel
+/// panics, segfaults, I/O errors, stack traces), and returns a list of
+/// structured findings together with an overall severity.
+///
+/// # Errors
+///
+/// Returns an error string if the file cannot be read.
+pub fn analyze_crash_dump(dump_path: &str) -> Result<(String, Vec<CrashFinding>, String), String> {
+    let content = std::fs::read_to_string(dump_path)
+        .map_err(|e| format!("Failed to read crash dump '{dump_path}': {e}"))?;
+
+    let mut findings: Vec<CrashFinding> = Vec::new();
+
+    for line in content.lines() {
+        let lower = line.to_lowercase();
+
+        if lower.contains("out of memory")
+            || lower.contains("oom_kill")
+            || lower.contains("killed process")
+        {
+            findings.push(CrashFinding {
+                severity: "critical",
+                finding_type: "oom_kill",
+                message: line.trim().to_string(),
+            });
+        } else if lower.contains("kernel panic")
+            || lower.contains("bug:")
+            || lower.contains("oops:")
+        {
+            findings.push(CrashFinding {
+                severity: "critical",
+                finding_type: "kernel_panic",
+                message: line.trim().to_string(),
+            });
+        } else if lower.contains("segfault") || lower.contains("general protection fault") {
+            findings.push(CrashFinding {
+                severity: "error",
+                finding_type: "segfault",
+                message: line.trim().to_string(),
+            });
+        } else if lower.contains("i/o error")
+            || lower.contains("ext4-fs error")
+            || lower.contains("buffer i/o error")
+        {
+            findings.push(CrashFinding {
+                severity: "error",
+                finding_type: "io_error",
+                message: line.trim().to_string(),
+            });
+        } else if lower.contains("call trace:") || lower.contains("rip:") {
+            findings.push(CrashFinding {
+                severity: "warning",
+                finding_type: "stack_trace",
+                message: line.trim().to_string(),
+            });
+        }
+    }
+
+    // Determine overall severity
+    let severity = if findings.iter().any(|f| f.severity == "critical") {
+        "critical"
+    } else if findings.iter().any(|f| f.severity == "error") {
+        "error"
+    } else if findings.iter().any(|f| f.severity == "warning") {
+        "warning"
+    } else if findings.is_empty() {
+        "clean"
+    } else {
+        "info"
+    };
+
+    let summary = if findings.is_empty() {
+        "No significant issues found in crash dump.".to_string()
+    } else {
+        format!(
+            "Found {} issue(s): {}",
+            findings.len(),
+            findings
+                .iter()
+                .map(|f| f.finding_type)
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    info!(
+        path = %dump_path,
+        severity = %severity,
+        findings = findings.len(),
+        "Crash dump analysis complete"
+    );
+
+    Ok((severity.to_string(), findings, summary))
+}
+
 /// Clamp a duration to valid bounds.
 fn clamp_duration(duration_secs: u32) -> u32 {
     if duration_secs == 0 {
@@ -569,5 +685,102 @@ mod tests {
         assert!(content.contains("--- Recent Kernel Logs ---"));
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    // ----- analyze_crash_dump tests -----
+
+    fn write_temp_dump(content: &str) -> (std::path::PathBuf, String) {
+        let path =
+            std::env::temp_dir().join(format!("keel-test-dump-{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&path, content).unwrap_or_else(|e| panic!("failed to write temp dump: {e}"));
+        let path_str = path
+            .to_str()
+            .unwrap_or_else(|| panic!("path not valid UTF-8"))
+            .to_string();
+        (path, path_str)
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_clean() {
+        let (path, path_str) =
+            write_temp_dump("=== KeelOS Crash Dump ===\nNothing unusual happened.\n");
+        let result = analyze_crash_dump(&path_str);
+        assert!(result.is_ok());
+        let (severity, findings, summary) =
+            result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert_eq!(severity, "clean");
+        assert!(findings.is_empty());
+        assert!(summary.contains("No significant issues"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_oom() {
+        let (path, path_str) = write_temp_dump(
+            "=== KeelOS Crash Dump ===\nOut of memory: Killed process 1234 (kubelet)\n",
+        );
+        let result = analyze_crash_dump(&path_str);
+        assert!(result.is_ok());
+        let (severity, findings, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert_eq!(severity, "critical");
+        assert!(findings.iter().any(|f| f.finding_type == "oom_kill"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_kernel_panic() {
+        let (path, path_str) = write_temp_dump(
+            "=== KeelOS Crash Dump ===\nKernel panic - not syncing: VFS unable to mount root fs\n",
+        );
+        let result = analyze_crash_dump(&path_str);
+        assert!(result.is_ok());
+        let (severity, findings, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert_eq!(severity, "critical");
+        assert!(findings.iter().any(|f| f.finding_type == "kernel_panic"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_segfault() {
+        let (path, path_str) = write_temp_dump(
+            "=== KeelOS Crash Dump ===\ncontainerd[456]: segfault at 0 ip 00007f rsp 00007fff error 6\n",
+        );
+        let result = analyze_crash_dump(&path_str);
+        assert!(result.is_ok());
+        let (severity, findings, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert_eq!(severity, "error");
+        assert!(findings.iter().any(|f| f.finding_type == "segfault"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_io_error() {
+        let (path, path_str) = write_temp_dump(
+            "=== KeelOS Crash Dump ===\nBuffer I/O error on dev sda1, logical block 1234\n",
+        );
+        let result = analyze_crash_dump(&path_str);
+        assert!(result.is_ok());
+        let (severity, findings, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert_eq!(severity, "error");
+        assert!(findings.iter().any(|f| f.finding_type == "io_error"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_missing_file() {
+        let result = analyze_crash_dump("/nonexistent/path/crash-dump.txt");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_analyze_crash_dump_severity_precedence() {
+        // Both segfault (error) and OOM (critical) present — overall should be critical
+        let (path, path_str) =
+            write_temp_dump("segfault at 0x0\nOut of memory: Killed process 99 (agent)\n");
+        let result = analyze_crash_dump(&path_str);
+        assert!(result.is_ok());
+        let (severity, _, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert_eq!(severity, "critical");
+        let _ = std::fs::remove_file(&path);
     }
 }

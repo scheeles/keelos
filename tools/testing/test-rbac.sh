@@ -3,7 +3,7 @@ set -u
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
-LOG_FILE="/tmp/qemu-diagnostics-test.log"
+LOG_FILE="/tmp/qemu-rbac-test.log"
 TIMEOUT=60
 OSCTL="${BUILD_DIR}/osctl"
 
@@ -29,7 +29,7 @@ fi
 # Ensure osctl is executable
 chmod +x "${OSCTL}"
 
-echo -e "${GREEN}>>> Starting Diagnostics & Debugging E2E Test...${NC}"
+echo -e "${GREEN}>>> Starting RBAC E2E Test...${NC}"
 echo "    Log:    ${LOG_FILE}"
 echo "    Timeout: ${TIMEOUT}s"
 echo ""
@@ -39,11 +39,13 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 
 # Each test uses a unique port to avoid stale port state from previous QEMU instances
-NEXT_PORT=50060
+# Starts at 50070 to avoid conflicts with other test scripts:
+#   test-network.sh uses 50052+, test-diagnostics.sh uses 50060+
+NEXT_PORT=50070
 
 # Cleanup trap to remove temporary disk images on exit
 cleanup() {
-    rm -f "${BUILD_DIR}"/sda-diag-*.img 2>/dev/null || true
+    rm -f "${BUILD_DIR}"/sda-rbac-*.img 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -58,7 +60,7 @@ start_qemu() {
     echo -e "${YELLOW}[${test_name}] Starting QEMU (port ${CURRENT_PORT})...${NC}"
 
     # Copy disk image for this test (avoids write lock conflicts between QEMU instances)
-    CURRENT_DISK="${BUILD_DIR}/sda-diag-${test_name}.img"
+    CURRENT_DISK="${BUILD_DIR}/sda-rbac-${test_name}.img"
     cp "${BUILD_DIR}/sda.img" "${CURRENT_DISK}"
 
     rm -f "${LOG_FILE}"
@@ -137,39 +139,25 @@ run_osctl_capture() {
 }
 
 # =============================================================================
-# TEST 1: Enable Debug Mode
+# TEST 1: Viewer-level access — GetStatus (should succeed without mTLS)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 1: Enable Debug Mode${NC}"
+echo -e "${YELLOW}TEST 1: Viewer Access — GetStatus${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST1"; then
-    echo "[TEST1] Enabling debug mode..."
-    output=$(run_osctl_capture diag debug --duration 600 --reason "e2e test")
+    echo "[TEST1] Calling status (Viewer endpoint, no mTLS)..."
+    output=$(run_osctl_capture status)
     exit_code=$?
 
-    if [ $exit_code -eq 0 ] && echo "$output" | grep -q "Session ID:"; then
-        echo -e "${GREEN}[TEST1] ✓ Debug mode enabled successfully${NC}"
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -qi "hostname\|version\|uptime"; then
+        echo -e "${GREEN}[TEST1] ✓ GetStatus succeeded (Viewer access allowed)${NC}"
         echo "$output"
-
-        # Verify debug status shows active
-        echo "[TEST1] Checking debug status..."
-        status_output=$(run_osctl_capture diag debug-status)
-
-        if echo "$status_output" | grep -q "ACTIVE"; then
-            echo -e "${GREEN}[TEST1] ✓ Debug status shows ACTIVE${NC}"
-            echo "$status_output"
-            echo -e "${GREEN}TEST 1: PASS${NC}"
-            ((TESTS_PASSED++))
-        else
-            echo -e "${RED}[TEST1] ✗ Debug status did not show ACTIVE${NC}"
-            echo "$status_output"
-            echo -e "${RED}TEST 1: FAIL${NC}"
-            ((TESTS_FAILED++))
-        fi
+        echo -e "${GREEN}TEST 1: PASS${NC}"
+        ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST1] ✗ Failed to enable debug mode${NC}"
+        echo -e "${RED}[TEST1] ✗ GetStatus failed${NC}"
         echo "$output"
         echo -e "${RED}TEST 1: FAIL${NC}"
         ((TESTS_FAILED++))
@@ -181,38 +169,26 @@ else
 fi
 
 # =============================================================================
-# TEST 2: Debug Mode Duplicate Rejection
+# TEST 2: Viewer-level access — GetHealth (should succeed without mTLS)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 2: Debug Mode Duplicate Rejection${NC}"
+echo -e "${YELLOW}TEST 2: Viewer Access — GetHealth${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST2"; then
-    echo "[TEST2] Enabling debug mode (first time)..."
-    output1=$(run_osctl_capture diag debug --duration 600 --reason "first session")
+    echo "[TEST2] Calling health (Viewer endpoint, no mTLS)..."
+    output=$(run_osctl_capture health)
+    exit_code=$?
 
-    if echo "$output1" | grep -q "Session ID:"; then
-        echo -e "${GREEN}[TEST2] ✓ First debug mode enabled${NC}"
-
-        echo "[TEST2] Enabling debug mode (second time - should fail)..."
-        output2=$(run_osctl_capture diag debug --duration 600 --reason "second session")
-
-        # The second attempt should report the mode is already active
-        if echo "$output2" | grep -qi "already active\|❌"; then
-            echo -e "${GREEN}[TEST2] ✓ Duplicate correctly rejected${NC}"
-            echo "$output2"
-            echo -e "${GREEN}TEST 2: PASS${NC}"
-            ((TESTS_PASSED++))
-        else
-            echo -e "${RED}[TEST2] ✗ Duplicate was not rejected${NC}"
-            echo "$output2"
-            echo -e "${RED}TEST 2: FAIL${NC}"
-            ((TESTS_FAILED++))
-        fi
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -qi "healthy\|degraded\|unhealthy\|status"; then
+        echo -e "${GREEN}[TEST2] ✓ GetHealth succeeded (Viewer access allowed)${NC}"
+        echo "$output"
+        echo -e "${GREEN}TEST 2: PASS${NC}"
+        ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST2] ✗ First enable failed${NC}"
-        echo "$output1"
+        echo -e "${RED}[TEST2] ✗ GetHealth failed${NC}"
+        echo "$output"
         echo -e "${RED}TEST 2: FAIL${NC}"
         ((TESTS_FAILED++))
     fi
@@ -223,24 +199,26 @@ else
 fi
 
 # =============================================================================
-# TEST 3: Debug Status When Inactive
+# TEST 3: Admin-level access — Reboot (should succeed without mTLS)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 3: Debug Status When Inactive${NC}"
+echo -e "${YELLOW}TEST 3: Admin Access — Reboot${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST3"; then
-    echo "[TEST3] Checking debug status (should be inactive)..."
-    output=$(run_osctl_capture diag debug-status)
+    echo "[TEST3] Calling reboot (Admin endpoint, no mTLS)..."
+    output=$(run_osctl_capture reboot --reason "RBAC e2e test")
+    exit_code=$?
 
-    if echo "$output" | grep -q "INACTIVE"; then
-        echo -e "${GREEN}[TEST3] ✓ Debug status correctly shows INACTIVE${NC}"
+    # Reboot should succeed (Admin endpoint, but no mTLS means all allowed)
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -qi "scheduled\|reboot\|success"; then
+        echo -e "${GREEN}[TEST3] ✓ Reboot succeeded (Admin access allowed without mTLS)${NC}"
         echo "$output"
         echo -e "${GREEN}TEST 3: PASS${NC}"
         ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST3] ✗ Debug status did not show INACTIVE${NC}"
+        echo -e "${RED}[TEST3] ✗ Reboot command failed${NC}"
         echo "$output"
         echo -e "${RED}TEST 3: FAIL${NC}"
         ((TESTS_FAILED++))
@@ -252,25 +230,25 @@ else
 fi
 
 # =============================================================================
-# TEST 4: Enable Recovery Mode
+# TEST 4: Operator-level access — CreateSnapshot (should succeed without mTLS)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 4: Enable Recovery Mode${NC}"
+echo -e "${YELLOW}TEST 4: Operator Access — CreateSnapshot${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST4"; then
-    echo "[TEST4] Enabling recovery mode..."
-    output=$(run_osctl_capture diag recovery --duration 600 --reason "e2e recovery test")
+    echo "[TEST4] Calling diag snapshot (Operator endpoint, no mTLS)..."
+    output=$(run_osctl_capture diag snapshot --label "rbac-test")
     exit_code=$?
 
-    if [ $exit_code -eq 0 ] && echo "$output" | grep -q "Expires at:"; then
-        echo -e "${GREEN}[TEST4] ✓ Recovery mode enabled successfully${NC}"
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -q "Snapshot ID:"; then
+        echo -e "${GREEN}[TEST4] ✓ CreateSnapshot succeeded (Operator access allowed without mTLS)${NC}"
         echo "$output"
         echo -e "${GREEN}TEST 4: PASS${NC}"
         ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST4] ✗ Failed to enable recovery mode${NC}"
+        echo -e "${RED}[TEST4] ✗ CreateSnapshot failed${NC}"
         echo "$output"
         echo -e "${RED}TEST 4: FAIL${NC}"
         ((TESTS_FAILED++))
@@ -282,34 +260,27 @@ else
 fi
 
 # =============================================================================
-# TEST 5: Collect Crash Dump
+# TEST 5: Unauthenticated access — InitBootstrap (exempt from RBAC)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 5: Collect Crash Dump${NC}"
+echo -e "${YELLOW}TEST 5: Unauthenticated — InitBootstrap${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST5"; then
-    echo "[TEST5] Collecting crash dump..."
-    output=$(run_osctl_capture diag crash-dump)
+    echo "[TEST5] Calling init bootstrap (RBAC-exempt endpoint)..."
+    # init bootstrap generates a 24h self-signed cert and sends it to the agent
+    output=$(run_osctl_capture init bootstrap --node "localhost:${CURRENT_PORT}")
     exit_code=$?
 
-    if [ $exit_code -eq 0 ] && echo "$output" | grep -q "Path:"; then
-        echo -e "${GREEN}[TEST5] ✓ Crash dump collected successfully${NC}"
+    # InitBootstrap should succeed regardless of certificates (RBAC-exempt)
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -qi "bootstrap\|certificate\|success"; then
+        echo -e "${GREEN}[TEST5] ✓ InitBootstrap succeeded (RBAC-exempt)${NC}"
         echo "$output"
-
-        # Verify the dump has a size > 0
-        if echo "$output" | grep -qE "Size: [0-9]"; then
-            echo -e "${GREEN}[TEST5] ✓ Crash dump has non-zero size${NC}"
-            echo -e "${GREEN}TEST 5: PASS${NC}"
-            ((TESTS_PASSED++))
-        else
-            echo -e "${RED}[TEST5] ✗ Crash dump size appears to be zero${NC}"
-            echo -e "${RED}TEST 5: FAIL${NC}"
-            ((TESTS_FAILED++))
-        fi
+        echo -e "${GREEN}TEST 5: PASS${NC}"
+        ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST5] ✗ Failed to collect crash dump${NC}"
+        echo -e "${RED}[TEST5] ✗ InitBootstrap failed${NC}"
         echo "$output"
         echo -e "${RED}TEST 5: FAIL${NC}"
         ((TESTS_FAILED++))
@@ -321,34 +292,25 @@ else
 fi
 
 # =============================================================================
-# TEST 6: Create System Snapshot
+# TEST 6: Admin-level access — EnableDebugMode (should succeed without mTLS)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 6: Create System Snapshot${NC}"
+echo -e "${YELLOW}TEST 6: Admin Access — EnableDebugMode${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST6"; then
-    echo "[TEST6] Creating system snapshot..."
-    output=$(run_osctl_capture diag snapshot --label "e2e-test-snapshot")
+    echo "[TEST6] Calling diag debug (Admin endpoint, no mTLS)..."
+    output=$(run_osctl_capture diag debug --duration 300 --reason "RBAC e2e test")
     exit_code=$?
 
-    if [ $exit_code -eq 0 ] && echo "$output" | grep -q "Snapshot ID:"; then
-        echo -e "${GREEN}[TEST6] ✓ System snapshot created successfully${NC}"
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -q "Session ID:"; then
+        echo -e "${GREEN}[TEST6] ✓ EnableDebugMode succeeded (Admin access allowed without mTLS)${NC}"
         echo "$output"
-
-        # Verify the snapshot has a path and size
-        if echo "$output" | grep -q "Path:" && echo "$output" | grep -qE "Size: [0-9]"; then
-            echo -e "${GREEN}[TEST6] ✓ Snapshot has valid path and size${NC}"
-            echo -e "${GREEN}TEST 6: PASS${NC}"
-            ((TESTS_PASSED++))
-        else
-            echo -e "${RED}[TEST6] ✗ Snapshot missing path or size${NC}"
-            echo -e "${RED}TEST 6: FAIL${NC}"
-            ((TESTS_FAILED++))
-        fi
+        echo -e "${GREEN}TEST 6: PASS${NC}"
+        ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST6] ✗ Failed to create system snapshot${NC}"
+        echo -e "${RED}[TEST6] ✗ EnableDebugMode failed${NC}"
         echo "$output"
         echo -e "${RED}TEST 6: FAIL${NC}"
         ((TESTS_FAILED++))
@@ -360,50 +322,26 @@ else
 fi
 
 # =============================================================================
-# TEST 7: Analyze Crash Dump
+# TEST 7: Viewer-level access — GetDebugStatus (should succeed without mTLS)
 # =============================================================================
 echo ""
 echo -e "${YELLOW}========================================${NC}"
-echo -e "${YELLOW}TEST 7: Analyze Crash Dump${NC}"
+echo -e "${YELLOW}TEST 7: Viewer Access — GetDebugStatus${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
 if start_qemu "TEST7"; then
-    echo "[TEST7] Collecting crash dump to get a path for analysis..."
-    collect_output=$(run_osctl_capture diag crash-dump)
-    collect_exit=$?
+    echo "[TEST7] Calling diag debug-status (Viewer endpoint, no mTLS)..."
+    output=$(run_osctl_capture diag debug-status)
+    exit_code=$?
 
-    if [ $collect_exit -eq 0 ] && echo "$collect_output" | grep -q "Path:"; then
-        # Extract the dump path from the collection output
-        dump_path=$(echo "$collect_output" | grep "Path:" | awk '{print $2}')
-        echo "[TEST7] Dump collected at: ${dump_path}"
-
-        echo "[TEST7] Analyzing crash dump..."
-        analyze_output=$(run_osctl_capture diag analyze-dump --path "$dump_path")
-        analyze_exit=$?
-
-        if [ $analyze_exit -eq 0 ] && echo "$analyze_output" | grep -q "Severity:"; then
-            echo -e "${GREEN}[TEST7] ✓ Crash dump analyzed successfully${NC}"
-            echo "$analyze_output"
-
-            # Verify the analysis includes a summary
-            if echo "$analyze_output" | grep -q "Summary:"; then
-                echo -e "${GREEN}[TEST7] ✓ Analysis output contains a summary${NC}"
-                echo -e "${GREEN}TEST 7: PASS${NC}"
-                ((TESTS_PASSED++))
-            else
-                echo -e "${RED}[TEST7] ✗ Analysis output missing Summary field${NC}"
-                echo -e "${RED}TEST 7: FAIL${NC}"
-                ((TESTS_FAILED++))
-            fi
-        else
-            echo -e "${RED}[TEST7] ✗ Failed to analyze crash dump${NC}"
-            echo "$analyze_output"
-            echo -e "${RED}TEST 7: FAIL${NC}"
-            ((TESTS_FAILED++))
-        fi
+    if [ $exit_code -eq 0 ] && echo "$output" | grep -qi "INACTIVE\|ACTIVE"; then
+        echo -e "${GREEN}[TEST7] ✓ GetDebugStatus succeeded (Viewer access allowed without mTLS)${NC}"
+        echo "$output"
+        echo -e "${GREEN}TEST 7: PASS${NC}"
+        ((TESTS_PASSED++))
     else
-        echo -e "${RED}[TEST7] ✗ Failed to collect crash dump for analysis${NC}"
-        echo "$collect_output"
+        echo -e "${RED}[TEST7] ✗ GetDebugStatus failed${NC}"
+        echo "$output"
         echo -e "${RED}TEST 7: FAIL${NC}"
         ((TESTS_FAILED++))
     fi
@@ -427,9 +365,9 @@ echo -e "${RED}Failed: ${TESTS_FAILED}${NC}"
 echo ""
 
 if [ $TESTS_FAILED -eq 0 ]; then
-    echo -e "${GREEN}>>> ALL DIAGNOSTICS TESTS PASSED! ✓${NC}"
+    echo -e "${GREEN}>>> ALL RBAC TESTS PASSED! ✓${NC}"
     exit 0
 else
-    echo -e "${RED}>>> SOME DIAGNOSTICS TESTS FAILED ✗${NC}"
+    echo -e "${RED}>>> SOME RBAC TESTS FAILED ✗${NC}"
     exit 1
 fi
