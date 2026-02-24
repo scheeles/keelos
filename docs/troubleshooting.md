@@ -223,3 +223,4 @@ rm build/sda.img
 - Review the [Architecture](./learn-more/architecture.md) to understand the boot sequence
 - See the [Certificate Management](./certificate-management.md) guide for mTLS issues
 - See the [Network API Reference](./reference/network-api.md) for network configuration
+- See the [Diagnostics Guide](./guides/diagnostics.md) for debug mode and crash dumps
