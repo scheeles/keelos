@@ -13,52 +13,200 @@ on:
     types: [opened, synchronize]
 
 jobs:
-  claude:
+
+  # ── Interactive assistant ────────────────────────────────────────────────────
+  # Responds to @claude mentions in PR/issue comments and reviews.
+  claude-assistant:
+    name: Claude Assistant
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude'))) ||
-      (github.event_name == 'pull_request')
+      (github.event_name == 'issues' && github.event.action == 'assigned' &&
+        (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
       issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Run Claude Code
-        id: claude
+      - name: Run Claude Assistant
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-
-          # Configure Claude's behavior for KeelOS project
+          model: claude-sonnet-4-6
+          max_turns: "10"
           claude_args: |
-            --model claude-opus-4-1-20250805
-            --max-turns 10
-            --system-prompt "You are reviewing code for KeelOS, an immutable API-driven Linux distribution. Follow these critical rules:
-            1. Review .ai-context/STYLE_GUIDE.md first
-            2. Ensure matic-init (PID 1) code NEVER panics - must use Result<T, E>
-            3. Verify all binaries are statically linked (musl)
-            4. Check that containerized builds are used
-            5. Require unit tests for all new code
-            6. Verify commit messages follow Conventional Commits
-            7. Check Rust code passes clippy::pedantic
-            8. Ensure no unwrap() or expect() in runtime code
-            9. Verify async code uses tokio properly
-            10. Check documentation updates when needed"
+            --system-prompt "You are an AI assistant for the KeelOS project — an immutable, API-driven Linux distribution for Kubernetes workloads. Key rules:
+            - keel-init is PID 1 and must NEVER panic; always use Result<T, E> with the ? operator
+            - No unwrap() or expect() in runtime code (enforced by clippy::unwrap_used / expect_used)
+            - All system components are in Rust; tooling may use Go
+            - Statically link all binaries using x86_64-unknown-linux-musl
+            - Async code uses tokio; keel-init should remain synchronous where possible
+            - Commit messages follow Conventional Commits (feat:, fix:, docs:, chore:, etc.)
+            - Builds must run in a container via ./tools/builder/build.sh
+            - All new code requires unit tests in #[cfg(test)] modules"
 
-          # Optional: Advanced settings configuration
-          # settings: |
-          #   {
-          #     "env": {
-          #       "RUST_BACKTRACE": "1"
-          #     }
-          #   }
+  # ── Automatic PR Code Review ─────────────────────────────────────────────────
+  # Runs a full code review automatically when a PR is opened or updated.
+  # Does not require an @claude mention.
+  pr-review:
+    name: Automatic PR Review
+    if: github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'synchronize')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude PR Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-sonnet-4-6
+          max_turns: "5"
+          direct_prompt: |
+            You are performing an automated code review for a pull request in the KeelOS project —
+            an immutable, API-driven Linux distribution exclusively for Kubernetes workloads.
+
+            Review every changed file and post a structured PR review comment. Use the headings below.
+
+            ## 1. Safety & Correctness (BLOCKING if violated)
+            - **No panics in keel-init (PID 1)**: any use of `unwrap()`, `expect()`, or `panic!()` outside
+              of `#[cfg(test)]` blocks is an immediate request-changes.
+            - Unsafe blocks must have a `// SAFETY:` comment explaining the invariant.
+            - Verify error propagation with `?` is consistent throughout changed call chains.
+
+            ## 2. Code Quality
+            - Code must pass `cargo clippy --workspace -- -D warnings` with `clippy::all`,
+              `clippy::pedantic`, `clippy::nursery`, and `clippy::cargo` enabled.
+            - Flag dead code, unused imports, unnecessary allocations, or missing `/// # Errors` docs
+              on public functions that return `Result`.
+            - Async code (`keel-agent`) must use `tokio` correctly; `keel-init` must stay synchronous.
+
+            ## 3. Build & Static Linking
+            - All binaries must be statically linked (`x86_64-unknown-linux-musl`).
+            - Builds must be run via the containerised builder (`./tools/builder/build.sh`).
+            - Flag any new dynamic dependency added without justification.
+
+            ## 4. Test Coverage
+            - Unit tests are mandatory for all new logic (`#[cfg(test)]` inline modules).
+            - Changes to boot sequence, artifact creation, or system behaviour need a script
+              added to `tools/testing/`.
+            - Significant networking or container lifecycle changes need QEMU-based E2E tests.
+
+            ## 5. Documentation
+            - Public Rust items (`pub`) must have `///` doc comments.
+            - New or changed `osctl` commands → update `/docs/using-osctl.md`.
+            - API or boot sequence changes → update `/docs/architecture.md`.
+            - New build requirements → update `/docs/getting-started.md`.
+
+            ## 6. Commit & PR Standards
+            - Every commit message must follow Conventional Commits
+              (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, etc.).
+            - Each commit should be a single, atomic unit of work.
+            - The PR description must follow `.github/PULL_REQUEST_TEMPLATE.md`.
+
+            ## 7. Security
+            - mTLS must be used for all inter-component communication.
+            - No secrets, tokens, or credentials embedded in code.
+            - New network-accessible endpoints require a security justification note.
+
+            ---
+            Decision guide:
+            - **Request changes** if: panics in PID 1 code, missing tests for new logic,
+              unsafe code without SAFETY comments, broken static linking, or missing mTLS.
+            - **Approve with suggestions** if: only style/doc issues or minor nits.
+            - **Approve** if: all checks pass and the change is well-scoped.
+
+            Be concise — KeelOS contributors are experienced system engineers.
+
+  # ── Issue Auto-Triage and Labeling ───────────────────────────────────────────
+  # Automatically triages every new issue: applies labels and posts a triage comment.
+  # Does not require an @claude mention.
+  issue-triage:
+    name: Issue Auto-Triage
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          model: claude-sonnet-4-6
+          max_turns: "3"
+          direct_prompt: |
+            You are triaging a new GitHub issue for the KeelOS project —
+            an immutable, API-driven Linux distribution for Kubernetes workloads.
+
+            Analyse the issue title and body, then:
+
+            ### Step 1 — Apply labels via `gh issue edit <number> --add-label "<label>"`
+
+            Choose from the following label sets (apply all that fit):
+
+            **Type** (pick one):
+            - `bug`           — something is broken or behaves incorrectly
+            - `enhancement`   — new feature or improvement request
+            - `documentation` — docs are missing, wrong, or unclear
+            - `question`      — user needs guidance or clarification
+            - `security`      — potential security vulnerability or hardening request
+            - `performance`   — throughput, latency, or resource usage concern
+
+            **Component** (pick all that apply):
+            - `keel-init`     — PID 1, boot sequence, process reaping, signal handling
+            - `keel-agent`    — gRPC management API
+            - `osctl`         — admin CLI
+            - `kernel`        — kernel config, patches, modules
+            - `build-system`  — builder container, CI, Cargo workspace
+            - `testing`       — test harness, QEMU framework, verification scripts
+            - `networking`    — network interface config, CNI
+            - `containerd`    — container runtime
+            - `kubelet`       — Kubernetes node agent
+
+            **Priority** (pick one):
+            - `priority:critical` — data loss, security vulnerability, panic in PID 1, boot failure
+            - `priority:high`     — core functionality broken, keel-agent API failure
+            - `priority:low`      — cosmetic, minor UX, or documentation gap
+
+            **Status** (optional):
+            - `needs-more-info`  — insufficient detail to investigate or reproduce
+            - `good-first-issue` — well-scoped, low complexity, good for new contributors
+
+            ### Step 2 — Post a triage comment on the issue
+
+            The comment should include:
+            - **Summary**: one sentence describing what the issue is about.
+            - **Affected component(s)**: list the KeelOS component(s) involved.
+            - **Reproduction steps** (bugs only): if missing or unclear, ask for them explicitly.
+            - **Questions** (if any): anything needed before investigation can begin.
+            - **Relevant docs**: link to `/docs/architecture.md`, `/docs/using-osctl.md`,
+              or a component README if applicable.
+
+            Keep the comment concise. KeelOS users are experienced system engineers —
+            skip introductory explanations.
