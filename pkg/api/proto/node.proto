@@ -50,6 +50,23 @@ service NodeService {
   
   // Get runtime network status (link state, IP addresses, statistics)
   rpc GetNetworkStatus (GetNetworkStatusRequest) returns (GetNetworkStatusResponse);
+
+  // --- Diagnostics & Debugging ---
+
+  // Enable time-limited debug mode (audit logged)
+  rpc EnableDebugMode (EnableDebugModeRequest) returns (EnableDebugModeResponse);
+
+  // Disable debug mode immediately
+  rpc DisableDebugMode (DisableDebugModeRequest) returns (DisableDebugModeResponse);
+
+  // Stream system logs via gRPC
+  rpc StreamLogs (StreamLogsRequest) returns (stream LogEntry);
+
+  // Collect system crash dumps
+  rpc CollectCrashDump (CollectCrashDumpRequest) returns (stream CrashDumpData);
+
+  // Create system snapshot/backup
+  rpc CreateSystemSnapshot (CreateSystemSnapshotRequest) returns (stream SnapshotData);
 }
 
 message InstallUpdateRequest {
@@ -456,4 +473,58 @@ message InterfaceStatistics {
   
   // Transmit errors
   uint64 tx_errors = 6;
+}
+
+// Diagnostics & Debugging Messages
+
+message EnableDebugModeRequest {
+  uint32 duration_mins = 1;
+  string reason = 2;
+}
+
+message EnableDebugModeResponse {
+  bool success = 1;
+  string message = 2;
+  string expires_at = 3;
+}
+
+message DisableDebugModeRequest {
+  string reason = 1;
+}
+
+message DisableDebugModeResponse {
+  bool success = 1;
+}
+
+message StreamLogsRequest {
+  string filter = 1;
+  bool follow = 2;
+  uint32 tail = 3;
+}
+
+message LogEntry {
+  string timestamp = 1;
+  string level = 2;
+  string message = 3;
+  string source = 4;
+}
+
+message CollectCrashDumpRequest {
+  string since = 1; // RFC3339
+}
+
+message CrashDumpData {
+  string filename = 1;
+  bytes data = 2;
+  uint64 total_size = 3;
+}
+
+message CreateSystemSnapshotRequest {
+  bool include_logs = 1;
+  bool include_config = 2;
+}
+
+message SnapshotData {
+  bytes data = 1;
+  uint64 total_size = 2;
 }

@@ -14,16 +14,18 @@
 use keel_api::node::node_service_server::{NodeService, NodeServiceServer};
 use keel_api::node::{
     BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
-    CancelScheduledUpdateResponse, ConfigureNetworkRequest, ConfigureNetworkResponse,
+    CancelScheduledUpdateResponse, CollectCrashDumpRequest, ConfigureNetworkRequest,
+    ConfigureNetworkResponse, CrashDumpData, CreateSystemSnapshotRequest, DisableDebugModeRequest,
+    DisableDebugModeResponse, EnableDebugModeRequest, EnableDebugModeResponse,
     GetBootstrapStatusRequest, GetBootstrapStatusResponse, GetHealthRequest, GetHealthResponse,
     GetNetworkConfigRequest, GetNetworkConfigResponse, GetNetworkStatusRequest,
     GetNetworkStatusResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
     GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
-    InstallUpdateRequest, RebootRequest, RebootResponse, RollbackEvent, RotateCertificateRequest,
-    RotateCertificateResponse, ScheduleUpdateRequest, ScheduleUpdateResponse,
-    TriggerRollbackRequest, TriggerRollbackResponse, UpdateProgress,
-    UpdateSchedule as ProtoUpdateSchedule,
+    InstallUpdateRequest, LogEntry, RebootRequest, RebootResponse, RollbackEvent,
+    RotateCertificateRequest, RotateCertificateResponse, ScheduleUpdateRequest,
+    ScheduleUpdateResponse, SnapshotData, StreamLogsRequest, TriggerRollbackRequest,
+    TriggerRollbackResponse, UpdateProgress, UpdateSchedule as ProtoUpdateSchedule,
 };
 use std::pin::Pin;
 use std::sync::Arc;
@@ -34,6 +36,7 @@ use tracing::{debug, error, info, warn};
 
 mod cert_metrics;
 mod cert_renewal;
+mod diagnostics;
 mod disk;
 mod health;
 mod health_check;
@@ -44,6 +47,7 @@ mod network;
 mod telemetry;
 mod update_scheduler;
 
+use diagnostics::DiagnosticsManager;
 use health_check::{HealthChecker, HealthCheckerConfig};
 use hooks::execute_hook;
 use mtls::TlsManager;
@@ -53,6 +57,7 @@ use update_scheduler::{ScheduleStatus, UpdateScheduler};
 pub struct HelperNodeService {
     scheduler: Arc<UpdateScheduler>,
     health_checker: Arc<HealthChecker>,
+    diagnostics_manager: Arc<DiagnosticsManager>,
 }
 
 #[tonic::async_trait]
@@ -724,6 +729,80 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetNetworkStatusResponse>, Status> {
         network::get_network_status(request).await
     }
+
+    async fn enable_debug_mode(
+        &self,
+        request: Request<EnableDebugModeRequest>,
+    ) -> Result<Response<EnableDebugModeResponse>, Status> {
+        let req = request.into_inner();
+        let (success, message, expires_at) = self
+            .diagnostics_manager
+            .enable_debug_mode(req.duration_mins, req.reason)
+            .await;
+
+        Ok(Response::new(EnableDebugModeResponse {
+            success,
+            message,
+            expires_at: expires_at.map(|dt| dt.to_rfc3339()).unwrap_or_default(),
+        }))
+    }
+
+    async fn disable_debug_mode(
+        &self,
+        request: Request<DisableDebugModeRequest>,
+    ) -> Result<Response<DisableDebugModeResponse>, Status> {
+        let req = request.into_inner();
+        let success = self
+            .diagnostics_manager
+            .disable_debug_mode(req.reason)
+            .await;
+
+        Ok(Response::new(DisableDebugModeResponse { success }))
+    }
+
+    type StreamLogsStream = Pin<Box<dyn Stream<Item = Result<LogEntry, Status>> + Send>>;
+
+    async fn stream_logs(
+        &self,
+        request: Request<StreamLogsRequest>,
+    ) -> Result<Response<Self::StreamLogsStream>, Status> {
+        let req = request.into_inner();
+        let stream = self
+            .diagnostics_manager
+            .stream_logs(req.filter, req.follow, req.tail);
+
+        Ok(Response::new(Box::pin(stream) as Self::StreamLogsStream))
+    }
+
+    type CollectCrashDumpStream = Pin<Box<dyn Stream<Item = Result<CrashDumpData, Status>> + Send>>;
+
+    async fn collect_crash_dump(
+        &self,
+        request: Request<CollectCrashDumpRequest>,
+    ) -> Result<Response<Self::CollectCrashDumpStream>, Status> {
+        let req = request.into_inner();
+        let stream = self.diagnostics_manager.collect_crash_dumps(req.since);
+
+        Ok(Response::new(
+            Box::pin(stream) as Self::CollectCrashDumpStream,
+        ))
+    }
+
+    type CreateSystemSnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotData, Status>> + Send>>;
+
+    async fn create_system_snapshot(
+        &self,
+        request: Request<CreateSystemSnapshotRequest>,
+    ) -> Result<Response<Self::CreateSystemSnapshotStream>, Status> {
+        let req = request.into_inner();
+        let stream = self
+            .diagnostics_manager
+            .create_system_snapshot(req.include_logs, req.include_config);
+
+        Ok(Response::new(
+            Box::pin(stream) as Self::CreateSystemSnapshotStream,
+        ))
+    }
 }
 
 /// Initialize operational certificates if running in Kubernetes
@@ -813,6 +892,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_config = HealthCheckerConfig::default();
     let health_checker = Arc::new(HealthChecker::new(health_config));
 
+    // Initialize diagnostics manager
+    let diagnostics_manager = Arc::new(DiagnosticsManager::new());
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
     tokio::spawn(async move {
@@ -822,6 +904,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_service = HelperNodeService {
         scheduler: scheduler.clone(),
         health_checker: health_checker.clone(),
+        diagnostics_manager: diagnostics_manager.clone(),
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
@@ -1096,9 +1179,11 @@ mod tests {
     async fn test_get_status() {
         let scheduler = Arc::new(UpdateScheduler::new("/tmp/test-schedules.json"));
         let health_checker = Arc::new(HealthChecker::new(HealthCheckerConfig::default()));
+        let diagnostics_manager = Arc::new(DiagnosticsManager::new());
         let service = HelperNodeService {
             scheduler,
             health_checker,
+            diagnostics_manager,
         };
         let request = tonic::Request::new(GetStatusRequest {});
         let response = service.get_status(request).await.unwrap();

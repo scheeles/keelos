@@ -81,6 +81,12 @@ fn run() -> Result<(), InitError> {
     boot_tracker.start_phase("network");
     setup_networking();
 
+    // Check for recovery mode
+    if check_recovery_mode() {
+        enter_recovery_mode()?;
+        return Ok(());
+    }
+
     // Check for test mode
     check_test_mode();
 
@@ -784,6 +790,40 @@ fn configure_dhcp_fallback() {
         Ok(status) => warn!(exit_code = ?status.code(), "Failed to bring up eth0"),
         Err(e) => warn!(error = %e, "Failed to bring up eth0"),
     }
+}
+
+/// Check if recovery mode is requested in kernel cmdline
+fn check_recovery_mode() -> bool {
+    if let Ok(cmdline) = fs::read_to_string("/proc/cmdline") {
+        if cmdline.contains("keel.recovery=1") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Start minimal services for recovery and an interactive shell
+fn enter_recovery_mode() -> Result<(), InitError> {
+    info!("🛠️  RECOVERY MODE ACTIVE");
+    info!("Minimal system initialized. Starting keel-agent and emergency shell.");
+
+    // Start agent for remote diagnostics
+    spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
+
+    // Start interactive shell
+    info!("Launching emergency shell...");
+    let mut shell = Command::new("/bin/sh")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| InitError::Spawn(format!("Failed to spawn shell: {}", e)))?;
+
+    // Wait for shell to exit
+    let _ = shell.wait();
+    info!("Emergency shell exited. System will remain in maintenance loop.");
+
+    Ok(())
 }
 
 /// Set up the system hostname

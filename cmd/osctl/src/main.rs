@@ -3,8 +3,10 @@ use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
     BootstrapKubernetesRequest, ConfigureNetworkRequest, DhcpConfig, DnsConfig,
     GetBootstrapStatusRequest, GetHealthRequest, GetNetworkConfigRequest, GetNetworkStatusRequest,
-    GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest, InstallUpdateRequest,
-    NetworkInterface, RebootRequest, StaticConfig, TriggerRollbackRequest,
+    CollectCrashDumpRequest, CreateSystemSnapshotRequest, DisableDebugModeRequest,
+    EnableDebugModeRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
+    InstallUpdateRequest, NetworkInterface, RebootRequest, StaticConfig, StreamLogsRequest,
+    TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -86,6 +88,63 @@ enum Commands {
     Network {
         #[command(subcommand)]
         action: NetworkAction,
+    },
+    /// Diagnostics and debugging commands
+    Debug {
+        #[command(subcommand)]
+        action: DebugAction,
+    },
+    /// Stream system logs
+    Logs {
+        /// Filter by unit/service name
+        #[arg(long)]
+        filter: Option<String>,
+        /// Follow log output
+        #[arg(short, long)]
+        follow: bool,
+        /// Number of lines to show from the end
+        #[arg(short, long, default_value_t = 100)]
+        tail: u32,
+    },
+    /// Collect system crash dumps
+    CrashDump {
+        /// Collect dumps since this time (RFC3339)
+        #[arg(long)]
+        since: Option<String>,
+        /// Output directory
+        #[arg(short, long, default_value = ".")]
+        output: PathBuf,
+    },
+    /// Create system snapshot/backup
+    Snapshot {
+        /// Include system logs in snapshot
+        #[arg(long)]
+        include_logs: bool,
+        /// Include configuration in snapshot
+        #[arg(long, default_value_t = true)]
+        include_config: bool,
+        /// Output filename
+        #[arg(short, long, default_value = "keelos-snapshot.tar.gz")]
+        output: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugAction {
+    /// Enable time-limited debug mode
+    Enable {
+        /// Duration in minutes
+        #[arg(short, long, default_value_t = 60)]
+        duration: u32,
+        /// Reason for enabling debug mode
+        #[arg(short, long, default_value = "Manual debugging via osctl")]
+        reason: String,
+    },
+    /// Disable debug mode immediately
+    Disable {
+        /// Reason for disabling debug mode
+        #[arg(short, long, default_value = "Manual disable via osctl")]
+        reason: String,
     },
 }
 
@@ -449,8 +508,102 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("\nTo join a cluster, run:\n   osctl bootstrap --api-server <url> --token <token> --ca-cert <path>");
             }
         }
-        Commands::Network { action } => {
-            match action {
+        Commands::Debug { action } => match action {
+            DebugAction::Enable { duration, reason } => {
+                let request = tonic::Request::new(EnableDebugModeRequest {
+                    duration_mins: *duration,
+                    reason: reason.clone(),
+                });
+                let response = client.enable_debug_mode(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                    println!("⏰ Expires at: {}", result.expires_at);
+                } else {
+                    println!("❌ Failed to enable debug mode: {}", result.message);
+                }
+            }
+            DebugAction::Disable { reason } => {
+                let request = tonic::Request::new(DisableDebugModeRequest {
+                    reason: reason.clone(),
+                });
+                let response = client.disable_debug_mode(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ Debug mode disabled");
+                } else {
+                    println!("❌ Failed to disable debug mode");
+                }
+            }
+        },
+        Commands::Logs {
+            filter,
+            follow,
+            tail,
+        } => {
+            let request = tonic::Request::new(StreamLogsRequest {
+                filter: filter.clone().unwrap_or_default(),
+                follow: *follow,
+                tail: *tail,
+            });
+            let mut stream = client.stream_logs(request).await?.into_inner();
+            while let Some(entry) = stream.next().await {
+                let e = entry?;
+                println!("{} [{}] {}: {}", e.timestamp, e.level, e.source, e.message);
+            }
+        }
+        Commands::CrashDump { since, output } => {
+            let request = tonic::Request::new(CollectCrashDumpRequest {
+                since: since.clone().unwrap_or_default(),
+            });
+            let mut stream = client.collect_crash_dump(request).await?.into_inner();
+            let mut current_file: Option<std::fs::File> = None;
+            let mut current_filename = String::new();
+
+            while let Some(chunk) = stream.next().await {
+                let c = chunk?;
+                if c.filename != current_filename {
+                    current_filename = c.filename.clone();
+                    let path = output.join(&current_filename);
+                    println!("📥 Receiving crash dump: {} ({:.2} MB)", current_filename, c.total_size as f64 / 1_048_576.0);
+                    current_file = Some(std::fs::File::create(path)?);
+                }
+                if let Some(ref mut f) = current_file {
+                    use std::io::Write;
+                    f.write_all(&c.data)?;
+                }
+            }
+            println!("✅ Crash dump collection complete");
+        }
+        Commands::Snapshot {
+            include_logs,
+            include_config,
+            output,
+        } => {
+            let request = tonic::Request::new(CreateSystemSnapshotRequest {
+                include_logs: *include_logs,
+                include_config: *include_config,
+            });
+            let mut stream = client.create_system_snapshot(request).await?.into_inner();
+            let mut file = std::fs::File::create(output)?;
+            let mut total_received: u64 = 0;
+
+            println!("🚀 Creating system snapshot...");
+            while let Some(chunk) = stream.next().await {
+                let c = chunk?;
+                use std::io::Write;
+                file.write_all(&c.data)?;
+                total_received += c.data.len() as u64;
+                if c.total_size > 0 {
+                    print!("\rProgress: {:.1}%", (total_received as f64 / c.total_size as f64) * 100.0);
+                    std::io::stdout().flush()?;
+                }
+            }
+            println!("\n✅ Snapshot saved to: {}", output.display());
+        }
+        Commands::Network { action } => match action {
                 NetworkAction::Config { action } => match action {
                     NetworkConfigAction::Set {
                         interface,
@@ -658,7 +811,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             }
         }
-    }
 
     Ok(())
 }
