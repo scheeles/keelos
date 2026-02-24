@@ -452,3 +452,28 @@ jobs:
         run: |
           chmod +x tools/testing/*.sh
           ./tools/testing/test-update-flow.sh
+
+  test-audit:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: keelos-build
+          path: build/
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Make osctl executable
+        run: chmod +x build/osctl
+
+      - name: Run Audit Logging E2E Test
+        run: |
+          chmod +x tools/testing/*.sh
+          ./tools/testing/test-audit.sh
