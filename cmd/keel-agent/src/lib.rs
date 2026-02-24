@@ -29,15 +29,17 @@ pub use update_scheduler::{ScheduleStatus, UpdateScheduler};
 
 use keel_api::node::node_service_server::NodeService;
 use keel_api::node::{
-    BootstrapKubernetesRequest, BootstrapKubernetesResponse, CancelScheduledUpdateRequest,
-    CancelScheduledUpdateResponse, CollectCrashDumpRequest, CollectCrashDumpResponse,
-    ConfigureNetworkRequest, ConfigureNetworkResponse, CreateSystemSnapshotRequest,
-    CreateSystemSnapshotResponse, EnableDebugModeRequest, EnableDebugModeResponse,
-    EnableRecoveryModeRequest, EnableRecoveryModeResponse, GetBootstrapStatusRequest,
-    GetBootstrapStatusResponse, GetDebugStatusRequest, GetDebugStatusResponse, GetHealthRequest,
-    GetHealthResponse, GetNetworkConfigRequest, GetNetworkConfigResponse, GetNetworkStatusRequest,
-    GetNetworkStatusResponse, GetRollbackHistoryRequest, GetRollbackHistoryResponse,
-    GetStatusRequest, GetStatusResponse, GetUpdateScheduleRequest, GetUpdateScheduleResponse,
+    AnalyzeCrashDumpRequest, AnalyzeCrashDumpResponse, BootstrapKubernetesRequest,
+    BootstrapKubernetesResponse, CancelScheduledUpdateRequest, CancelScheduledUpdateResponse,
+    CollectCrashDumpRequest, CollectCrashDumpResponse, ConfigureNetworkRequest,
+    ConfigureNetworkResponse, CrashDumpFinding as ProtoCrashDumpFinding,
+    CreateSystemSnapshotRequest, CreateSystemSnapshotResponse, EnableDebugModeRequest,
+    EnableDebugModeResponse, EnableRecoveryModeRequest, EnableRecoveryModeResponse,
+    GetBootstrapStatusRequest, GetBootstrapStatusResponse, GetDebugStatusRequest,
+    GetDebugStatusResponse, GetHealthRequest, GetHealthResponse, GetNetworkConfigRequest,
+    GetNetworkConfigResponse, GetNetworkStatusRequest, GetNetworkStatusResponse,
+    GetRollbackHistoryRequest, GetRollbackHistoryResponse, GetStatusRequest, GetStatusResponse,
+    GetUpdateScheduleRequest, GetUpdateScheduleResponse,
     HealthCheckResult as ProtoHealthCheckResult, InitBootstrapRequest, InitBootstrapResponse,
     InstallUpdateRequest, LogEntry, RebootRequest, RebootResponse, RollbackEvent,
     RotateCertificateRequest, RotateCertificateResponse, ScheduleUpdateRequest,
@@ -934,6 +936,42 @@ impl NodeService for HelperNodeService {
                 success: false,
                 message: e,
                 expires_at: String::new(),
+            })),
+        }
+    }
+
+    async fn analyze_crash_dump(
+        &self,
+        request: Request<AnalyzeCrashDumpRequest>,
+    ) -> Result<Response<AnalyzeCrashDumpResponse>, Status> {
+        let req = request.into_inner();
+
+        info!(dump_path = %req.dump_path, "Crash dump analysis requested");
+
+        match diagnostics::analyze_crash_dump(&req.dump_path) {
+            Ok((severity, findings, summary)) => {
+                let proto_findings = findings
+                    .into_iter()
+                    .map(|f| ProtoCrashDumpFinding {
+                        severity: f.severity.to_string(),
+                        finding_type: f.finding_type.to_string(),
+                        message: f.message,
+                    })
+                    .collect();
+                Ok(Response::new(AnalyzeCrashDumpResponse {
+                    success: true,
+                    message: "Crash dump analyzed successfully".to_string(),
+                    severity,
+                    findings: proto_findings,
+                    summary,
+                }))
+            }
+            Err(e) => Ok(Response::new(AnalyzeCrashDumpResponse {
+                success: false,
+                message: format!("Failed to analyze crash dump: {e}"),
+                severity: String::new(),
+                findings: vec![],
+                summary: String::new(),
             })),
         }
     }

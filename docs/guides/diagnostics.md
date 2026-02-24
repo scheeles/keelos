@@ -4,13 +4,14 @@ This guide explains how to use KeelOS diagnostics tools for troubleshooting prod
 
 ## Overview
 
-KeelOS provides six diagnostic capabilities:
+KeelOS provides seven diagnostic capabilities:
 
 | Tool | Purpose |
 |------|---------|
 | **Debug Mode** | Time-limited session with enhanced logging |
 | **Debug Status** | Check if debug mode is active |
 | **Crash Dump** | Collect kernel and userspace diagnostic data |
+| **Crash Dump Analysis** | Analyze a collected crash dump for known failure patterns |
 | **Log Streaming** | Stream and filter system logs in real time |
 | **Snapshot** | Create a point-in-time system state backup |
 | **Recovery Mode** | Enable emergency recovery for critical repairs |
@@ -108,6 +109,59 @@ To collect only userspace info (without kernel messages):
 
 ```bash
 osctl --endpoint http://<NODE_IP>:50051 diag crash-dump --no-kernel
+```
+
+## Crash Dump Analysis
+
+After collecting a dump, analyze it locally on the node to identify known failure patterns. The analysis scans for OOM kills, kernel panics, segfaults, I/O errors, and stack traces.
+
+### Analyze a Crash Dump
+
+```bash
+osctl --endpoint http://<NODE_IP>:50051 diag analyze-dump \
+  --path /var/lib/keel/crash-dumps/crash-20250115-143000.txt
+```
+
+**Output (issues found):**
+```
+🔍 Analyzing crash dump...
+✅ Crash dump analyzed successfully
+  Severity: critical
+  Summary: Found 2 issue(s): kernel_panic, oom_kill
+
+  Findings:
+    [critical/kernel_panic] Kernel panic - not syncing: VFS unable to mount root fs
+    [critical/oom_kill] Out of memory: Killed process 1234 (kubelet)
+```
+
+**Output (no issues):**
+```
+🔍 Analyzing crash dump...
+✅ Crash dump analyzed successfully
+  Severity: clean
+  Summary: No significant issues found in crash dump.
+```
+
+### Severity Levels
+
+| Severity | Description |
+|----------|-------------|
+| `critical` | OOM kills or kernel panics detected |
+| `error` | Segfaults or I/O errors detected |
+| `warning` | Stack traces or minor issues detected |
+| `clean` | No known failure patterns found |
+
+### Typical Workflow
+
+Collect and immediately analyze a dump in one step:
+
+```bash
+# 1. Collect
+dump_output=$(osctl diag crash-dump)
+dump_path=$(echo "$dump_output" | grep "Path:" | awk '{print $2}')
+
+# 2. Analyze
+osctl diag analyze-dump --path "$dump_path"
 ```
 
 ## Log Streaming
@@ -264,6 +318,11 @@ osctl --endpoint http://<NODE_IP>:50051 diag recovery \
    osctl diag crash-dump
    ```
 
+5. Analyze the dump for root cause:
+   ```bash
+   osctl diag analyze-dump --path /var/lib/keel/crash-dumps/crash-<timestamp>.txt
+   ```
+
 ### Node Health Degraded
 
 1. Check health status:
@@ -302,6 +361,7 @@ osctl --endpoint http://<NODE_IP>:50051 diag recovery \
 4. If issues occur, collect diagnostics:
    ```bash
    osctl diag crash-dump
+   osctl diag analyze-dump --path /var/lib/keel/crash-dumps/crash-<timestamp>.txt
    osctl diag logs --level error --tail 500
    ```
 

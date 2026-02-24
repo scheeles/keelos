@@ -68,6 +68,9 @@ service NodeService {
 
   // Enable emergency recovery mode
   rpc EnableRecoveryMode (EnableRecoveryModeRequest) returns (EnableRecoveryModeResponse);
+
+  // Analyze a previously collected crash dump
+  rpc AnalyzeCrashDump (AnalyzeCrashDumpRequest) returns (AnalyzeCrashDumpResponse);
 }
 
 message InstallUpdateRequest {
@@ -582,4 +585,30 @@ message EnableRecoveryModeResponse {
   string message = 2;
   // When recovery mode expires (RFC3339)
   string expires_at = 3;
+}
+
+message AnalyzeCrashDumpRequest {
+  // Path to the crash dump file to analyze
+  string dump_path = 1;
+}
+
+// A single finding from crash dump analysis
+message CrashDumpFinding {
+  // Severity: "critical", "error", "warning", "info"
+  string severity = 1;
+  // Type of finding (e.g., "oom_kill", "kernel_panic", "segfault", "io_error")
+  string finding_type = 2;
+  // Human-readable description
+  string message = 3;
+}
+
+message AnalyzeCrashDumpResponse {
+  bool success = 1;
+  string message = 2;
+  // Overall severity: "critical", "error", "warning", "info", "clean"
+  string severity = 3;
+  // Individual findings
+  repeated CrashDumpFinding findings = 4;
+  // Human-readable summary
+  string summary = 5;
 }

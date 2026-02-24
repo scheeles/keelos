@@ -4,11 +4,12 @@ This document describes the Diagnostics & Debugging API for KeelOS nodes.
 
 ## Overview
 
-The Diagnostics API provides six RPC methods for remote troubleshooting of KeelOS nodes:
+The Diagnostics API provides seven RPC methods for remote troubleshooting of KeelOS nodes:
 
 - **EnableDebugMode**: Activate time-limited debug session with enhanced logging
 - **GetDebugStatus**: Query current debug session status
 - **CollectCrashDump**: Gather kernel and userspace diagnostic data
+- **AnalyzeCrashDump**: Scan a collected crash dump for known failure patterns
 - **StreamLogs**: Stream system logs with level and component filtering
 - **CreateSystemSnapshot**: Create a point-in-time system state capture
 - **EnableRecoveryMode**: Activate emergency recovery mode
@@ -146,6 +147,73 @@ osctl diag crash-dump
   Path: /var/lib/keel/crash-dumps/crash-20250115-143000.txt
   Size: 245.67 KB
   Created: 2025-01-15T14:30:00+00:00
+```
+
+---
+
+### AnalyzeCrashDump
+
+Scans a previously collected crash dump file for known failure patterns and returns structured findings.
+
+**Request**: `AnalyzeCrashDumpRequest`
+```protobuf
+message AnalyzeCrashDumpRequest {
+  string dump_path = 1;  // On-node path to the crash dump file
+}
+```
+
+**Response**: `AnalyzeCrashDumpResponse`
+```protobuf
+message CrashDumpFinding {
+  string severity = 1;      // "critical", "error", "warning", "info"
+  string finding_type = 2;  // "oom_kill", "kernel_panic", "segfault", "io_error", "stack_trace"
+  string message = 3;       // Matching log line (human-readable)
+}
+
+message AnalyzeCrashDumpResponse {
+  bool success = 1;
+  string message = 2;
+  string severity = 3;                     // Overall severity
+  repeated CrashDumpFinding findings = 4;  // Individual findings
+  string summary = 5;                      // Human-readable summary
+}
+```
+
+**Detected patterns:**
+
+| Finding Type | Severity | Trigger |
+|---|---|---|
+| `oom_kill` | critical | "out of memory", "oom_kill", "killed process" |
+| `kernel_panic` | critical | "kernel panic", "bug:", "oops:" |
+| `segfault` | error | "segfault", "general protection fault" |
+| `io_error` | error | "i/o error", "ext4-fs error", "buffer i/o error" |
+| `stack_trace` | warning | "call trace:", "rip:" |
+
+**Overall severity precedence**: `critical > error > warning > clean` (when no findings)
+
+**Example (osctl)**:
+```bash
+osctl diag analyze-dump --path /var/lib/keel/crash-dumps/crash-20250115-143000.txt
+```
+
+**Example Output (issues found)**:
+```
+🔍 Analyzing crash dump...
+✅ Crash dump analyzed successfully
+  Severity: critical
+  Summary: Found 2 issue(s): kernel_panic, oom_kill
+
+  Findings:
+    [critical/kernel_panic] Kernel panic - not syncing: VFS unable to mount root fs
+    [critical/oom_kill] Out of memory: Killed process 1234 (kubelet)
+```
+
+**Example Output (clean)**:
+```
+🔍 Analyzing crash dump...
+✅ Crash dump analyzed successfully
+  Severity: clean
+  Summary: No significant issues found in crash dump.
 ```
 
 ---

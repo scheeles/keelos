@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
-    BootstrapKubernetesRequest, CollectCrashDumpRequest, ConfigureNetworkRequest,
-    CreateSystemSnapshotRequest, DhcpConfig, DnsConfig, EnableDebugModeRequest,
-    EnableRecoveryModeRequest, GetBootstrapStatusRequest, GetDebugStatusRequest, GetHealthRequest,
-    GetNetworkConfigRequest, GetNetworkStatusRequest, GetRollbackHistoryRequest, GetStatusRequest,
-    InitBootstrapRequest, InstallUpdateRequest, NetworkInterface, RebootRequest, StaticConfig,
-    StreamLogsRequest, TriggerRollbackRequest,
+    AnalyzeCrashDumpRequest, BootstrapKubernetesRequest, CollectCrashDumpRequest,
+    ConfigureNetworkRequest, CreateSystemSnapshotRequest, DhcpConfig, DnsConfig,
+    EnableDebugModeRequest, EnableRecoveryModeRequest, GetBootstrapStatusRequest,
+    GetDebugStatusRequest, GetHealthRequest, GetNetworkConfigRequest, GetNetworkStatusRequest,
+    GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest, InstallUpdateRequest,
+    NetworkInterface, RebootRequest, StaticConfig, StreamLogsRequest, TriggerRollbackRequest,
 };
 use std::path::PathBuf;
 use tokio_stream::StreamExt;
@@ -242,6 +242,12 @@ enum DiagAction {
         /// Reason for enabling recovery mode
         #[arg(long, default_value = "Manual recovery via osctl")]
         reason: String,
+    },
+    /// Analyze a previously collected crash dump
+    AnalyzeDump {
+        /// Path to the crash dump file to analyze
+        #[arg(long)]
+        path: String,
     },
 }
 
@@ -844,6 +850,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     std::process::exit(1);
                 }
             }
+            DiagAction::AnalyzeDump { path } => {
+                let request = tonic::Request::new(AnalyzeCrashDumpRequest {
+                    dump_path: path.clone(),
+                });
+
+                println!("🔍 Analyzing crash dump...");
+                let response = client.analyze_crash_dump(request).await?;
+                let result = response.into_inner();
+
+                if result.success {
+                    println!("✅ {}", result.message);
+                    println!("  Severity: {}", result.severity);
+                    println!("  Summary: {}", result.summary);
+                    if !result.findings.is_empty() {
+                        println!("\n  Findings:");
+                        for finding in &result.findings {
+                            println!(
+                                "    [{}/{}] {}",
+                                finding.severity, finding.finding_type, finding.message
+                            );
+                        }
+                    }
+                } else {
+                    eprintln!("❌ {}", result.message);
+                    std::process::exit(1);
+                }
+            }
         },
     }
 
@@ -1123,6 +1156,26 @@ mod tests {
             assert_eq!(reason, "emergency repair");
         } else {
             panic!("Expected Diag Recovery command");
+        }
+    }
+
+    #[test]
+    fn test_cli_parsing_diag_analyze_dump() {
+        let cli = Cli::try_parse_from([
+            "osctl",
+            "diag",
+            "analyze-dump",
+            "--path",
+            "/var/lib/keel/crash-dumps/crash-20240101-120000.txt",
+        ])
+        .unwrap();
+        if let Commands::Diag {
+            action: DiagAction::AnalyzeDump { path },
+        } = cli.command
+        {
+            assert_eq!(path, "/var/lib/keel/crash-dumps/crash-20240101-120000.txt");
+        } else {
+            panic!("Expected Diag AnalyzeDump command");
         }
     }
 }
