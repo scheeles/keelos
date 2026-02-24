@@ -93,6 +93,31 @@ sequenceDiagram
 
 **Bandwidth Savings**: Typically 60-90% reduction in download size for minor version updates.
 
+## Image Variants
+
+KeelOS builds specialized images for different deployment environments. Each variant customizes the kernel config, initramfs contents, and output formats while sharing the same core architecture.
+
+```mermaid
+graph TD
+    A[Base Build] --> B[cloud]
+    A --> C[bare-metal]
+    A --> D[edge]
+    A --> E[dev]
+    B --> F[RAW/QCOW2/VHD/GCP]
+    C --> G[ISO/PXE/RAW]
+    D --> H[RAW/PXE]
+    E --> I[ISO/QCOW2]
+```
+
+| Variant | Use Case | Key Differentiators |
+|---------|----------|---------------------|
+| `cloud` | AWS, GCP, Azure VMs | Cloud metadata agent, virtio/Hyper-V/Xen drivers |
+| `bare-metal` | Physical servers | IPMI, NIC drivers, PXE boot, storage controllers |
+| `edge` | IoT/edge nodes | Size-optimized kernel, stripped initramfs |
+| `dev` | Development | Debug symbols, tracing, extended busybox tools |
+
+See [Image Variants](./image-variants.md) for build instructions and deployment details.
+
 ## Security Model
 
 *   **mTLS**: All gRPC communication is secured with mutual TLS.

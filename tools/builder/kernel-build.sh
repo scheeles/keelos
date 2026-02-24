@@ -7,7 +7,7 @@ CACHE_DIR="/keelos/.cache/kernel"
 # Build in ephemeral container FS which is case-sensitive (fixes Mac host mount issues)
 BUILD_DIR="/tmp/kernel-build"
 SRC_DIR="${BUILD_DIR}/linux-${KERNEL_VERSION}"
-OUTPUT_DIR="/keelos/build/kernel"
+OUTPUT_DIR="${VARIANT_KERNEL_OUTPUT_DIR:-/keelos/build/kernel}"
 
 mkdir -p "${CACHE_DIR}"
 mkdir -p "${BUILD_DIR}"
@@ -109,6 +109,38 @@ make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- x86_64_defconfig
 ./scripts/config --enable CONFIG_EPOLL
 ./scripts/config --enable CONFIG_SIGNALFD
 ./scripts/config --enable CONFIG_TIMERFD
+
+# =============================================================================
+# Variant-specific kernel configuration
+# =============================================================================
+# Applied via VARIANT_KERNEL_EXTRA_ENABLE / VARIANT_KERNEL_EXTRA_DISABLE env vars
+# set by build-variant.sh when building image variants.
+
+if [ -n "${VARIANT_KERNEL_EXTRA_ENABLE:-}" ]; then
+    echo ">>> Applying variant kernel configs (enable)..."
+    for config in ${VARIANT_KERNEL_EXTRA_ENABLE}; do
+        config=$(echo "$config" | xargs)  # trim whitespace
+        if [ -n "$config" ]; then
+            ./scripts/config --enable "$config"
+        fi
+    done
+fi
+
+if [ -n "${VARIANT_KERNEL_EXTRA_DISABLE:-}" ]; then
+    echo ">>> Applying variant kernel configs (disable)..."
+    for config in ${VARIANT_KERNEL_EXTRA_DISABLE}; do
+        config=$(echo "$config" | xargs)  # trim whitespace
+        if [ -n "$config" ]; then
+            ./scripts/config --disable "$config"
+        fi
+    done
+fi
+
+# Override debug info setting if variant specifies it
+if [ "${VARIANT_KERNEL_DEBUG_INFO:-false}" = "true" ]; then
+    echo ">>> Enabling kernel debug info for variant..."
+    ./scripts/config --enable CONFIG_DEBUG_INFO
+fi
 
 # Update config to resolve any new dependencies non-interactively
 make ARCH=x86_64 CROSS_COMPILE=x86_64-linux-gnu- olddefconfig

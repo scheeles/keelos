@@ -2,7 +2,14 @@
 set -e
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TARGET_DIR="${PROJECT_ROOT}/target/x86_64-unknown-linux-musl/release"
+
+# Variant-aware target directory: build-variant.sh sets VARIANT_TARGET_PROFILE_DIR
+if [ -n "${VARIANT_TARGET_PROFILE_DIR:-}" ]; then
+    TARGET_DIR="${VARIANT_TARGET_PROFILE_DIR}"
+else
+    TARGET_DIR="${PROJECT_ROOT}/target/x86_64-unknown-linux-musl/release"
+fi
+
 OUTPUT_DIR="${PROJECT_ROOT}/build"
 INITRAMFS_DIR="${OUTPUT_DIR}/initramfs"
 
@@ -127,7 +134,11 @@ cp -L "${PROJECT_ROOT}/tools/builder/kubelet-config.yaml" "${INITRAMFS_DIR}/etc/
 echo ">>> Building keel-init..."
 # In a real scenario, this runs inside the docker container
 echo "Running cargo build..."
-cargo build --release --target x86_64-unknown-linux-musl --package keel-init --package keel-agent --package osctl
+if [ "${VARIANT_CARGO_PROFILE:-release}" = "dev" ]; then
+    cargo build --target x86_64-unknown-linux-musl --package keel-init --package keel-agent --package osctl
+else
+    cargo build --release --target x86_64-unknown-linux-musl --package keel-init --package keel-agent --package osctl
+fi
 
 # Check if binary exists (assuming user ran build or we are mocking)
 if [ ! -f "${TARGET_DIR}/keel-init" ]; then
@@ -213,6 +224,184 @@ if [ -d "${MODULE_DIR}" ]; then
 else
     echo "WARNING: Kernel modules directory not found at ${MODULE_DIR}"
     echo "VLAN and bonding support may not be available"
+fi
+
+# =============================================================================
+# Variant-specific content
+# =============================================================================
+# These sections are controlled by environment variables set by build-variant.sh.
+
+# Cloud metadata agent (for cloud variants)
+if [ "${VARIANT_CLOUD_INIT:-false}" = "true" ]; then
+    echo ">>> Adding cloud metadata agent..."
+    mkdir -p "${INITRAMFS_DIR}/etc/keel"
+
+    # Install cloud-init metadata fetch script
+    # This lightweight script queries IMDS (Instance Metadata Service) endpoints
+    # at boot to configure hostname, network, and SSH keys from cloud providers.
+    cat > "${INITRAMFS_DIR}/usr/bin/keel-cloud-init" << 'CLOUD_EOF'
+#!/bin/sh
+# KeelOS Cloud Metadata Agent
+# Fetches instance metadata from cloud provider IMDS endpoints at boot.
+# Supports AWS, GCP, and Azure metadata services.
+
+set -e
+
+METADATA_DIR="/run/keel/metadata"
+mkdir -p "${METADATA_DIR}"
+
+log() { echo "[cloud-init] $*"; }
+
+# Detect cloud provider by probing metadata endpoints
+detect_provider() {
+    # AWS IMDSv2
+    if TOKEN=$(wget -q -O - --header "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+        --method PUT "http://169.254.169.254/latest/api/token" 2>/dev/null); then
+        echo "aws"
+        echo "${TOKEN}" > "${METADATA_DIR}/imds-token"
+        return
+    fi
+
+    # GCP
+    if wget -q -O /dev/null --header "Metadata-Flavor: Google" \
+        "http://metadata.google.internal/computeMetadata/v1/" 2>/dev/null; then
+        echo "gcp"
+        return
+    fi
+
+    # Azure
+    if wget -q -O /dev/null --header "Metadata: true" \
+        "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>/dev/null; then
+        echo "azure"
+        return
+    fi
+
+    echo "unknown"
+}
+
+fetch_aws() {
+    TOKEN=$(cat "${METADATA_DIR}/imds-token" 2>/dev/null || true)
+    HDR="X-aws-ec2-metadata-token: ${TOKEN}"
+    BASE="http://169.254.169.254/latest/meta-data"
+
+    HOSTNAME=$(wget -q -O - --header "${HDR}" "${BASE}/hostname" 2>/dev/null || true)
+    INSTANCE_ID=$(wget -q -O - --header "${HDR}" "${BASE}/instance-id" 2>/dev/null || true)
+    REGION=$(wget -q -O - --header "${HDR}" "${BASE}/placement/region" 2>/dev/null || true)
+
+    echo "${HOSTNAME}" > "${METADATA_DIR}/hostname"
+    echo "${INSTANCE_ID}" > "${METADATA_DIR}/instance-id"
+    echo "${REGION}" > "${METADATA_DIR}/region"
+    echo "aws" > "${METADATA_DIR}/provider"
+}
+
+fetch_gcp() {
+    HDR="Metadata-Flavor: Google"
+    BASE="http://metadata.google.internal/computeMetadata/v1"
+
+    HOSTNAME=$(wget -q -O - --header "${HDR}" "${BASE}/instance/hostname" 2>/dev/null || true)
+    INSTANCE_ID=$(wget -q -O - --header "${HDR}" "${BASE}/instance/id" 2>/dev/null || true)
+    ZONE=$(wget -q -O - --header "${HDR}" "${BASE}/instance/zone" 2>/dev/null || true)
+
+    echo "${HOSTNAME}" > "${METADATA_DIR}/hostname"
+    echo "${INSTANCE_ID}" > "${METADATA_DIR}/instance-id"
+    echo "${ZONE}" > "${METADATA_DIR}/zone"
+    echo "gcp" > "${METADATA_DIR}/provider"
+}
+
+fetch_azure() {
+    HDR="Metadata: true"
+    BASE="http://169.254.169.254/metadata/instance?api-version=2021-02-01"
+
+    META=$(wget -q -O - --header "${HDR}" "${BASE}" 2>/dev/null || true)
+    # Azure returns JSON; extract fields with simple pattern matching
+    HOSTNAME=$(echo "${META}" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p' | head -1)
+    VMID=$(echo "${META}" | sed -n 's/.*"vmId":"\([^"]*\)".*/\1/p' | head -1)
+    LOCATION=$(echo "${META}" | sed -n 's/.*"location":"\([^"]*\)".*/\1/p' | head -1)
+
+    echo "${HOSTNAME}" > "${METADATA_DIR}/hostname"
+    echo "${VMID}" > "${METADATA_DIR}/instance-id"
+    echo "${LOCATION}" > "${METADATA_DIR}/region"
+    echo "azure" > "${METADATA_DIR}/provider"
+}
+
+# Main
+log "Detecting cloud provider..."
+PROVIDER=$(detect_provider)
+log "Detected provider: ${PROVIDER}"
+
+case "${PROVIDER}" in
+    aws)   fetch_aws ;;
+    gcp)   fetch_gcp ;;
+    azure) fetch_azure ;;
+    *)     log "No cloud provider detected, skipping metadata fetch" ;;
+esac
+
+# Apply hostname if found
+if [ -f "${METADATA_DIR}/hostname" ] && [ -s "${METADATA_DIR}/hostname" ]; then
+    HOSTNAME=$(cat "${METADATA_DIR}/hostname")
+    hostname "${HOSTNAME}" 2>/dev/null || true
+    log "Set hostname to: ${HOSTNAME}"
+fi
+
+log "Metadata written to ${METADATA_DIR}"
+CLOUD_EOF
+    chmod +x "${INITRAMFS_DIR}/usr/bin/keel-cloud-init"
+
+    # Write cloud variant marker
+    echo "cloud" > "${INITRAMFS_DIR}/etc/keel/variant"
+    echo "  Added cloud metadata agent"
+fi
+
+# Debug tools (for dev variants)
+if [ "${VARIANT_DEBUG_TOOLS:-false}" = "true" ]; then
+    echo ">>> Adding debug tools..."
+
+    # Create additional busybox symlinks for debugging
+    for tool in ls cat ps top dmesg free df du netstat ss lsof vi ping traceroute \
+                nslookup wget tail head wc grep awk sed tr sort uniq tee \
+                find xargs env printenv id whoami uptime; do
+        ln -sf busybox "${INITRAMFS_DIR}/bin/${tool}" 2>/dev/null || true
+    done
+    echo "  Added busybox debug applet symlinks"
+
+    # Write dev variant marker
+    mkdir -p "${INITRAMFS_DIR}/etc/keel"
+    echo "dev" > "${INITRAMFS_DIR}/etc/keel/variant"
+    echo "  Debug tools installed"
+fi
+
+# Edge minimal mode: remove non-essential components to reduce footprint
+if [ "${VARIANT_MINIMAL:-false}" = "true" ]; then
+    echo ">>> Applying edge/minimal optimizations..."
+
+    # Remove CNI plugins not commonly needed on edge
+    # Keep only: bridge, host-local, loopback, portmap
+    for plugin in "${INITRAMFS_DIR}"/opt/cni/bin/*; do
+        name=$(basename "$plugin")
+        case "$name" in
+            bridge|host-local|loopback|portmap) ;;
+            *) rm -f "$plugin"; echo "  Removed CNI plugin: $name" ;;
+        esac
+    done
+
+    # Remove pre-loaded container images to save space (will pull on demand)
+    if [ -d "${INITRAMFS_DIR}/usr/share/keel/images" ]; then
+        rm -rf "${INITRAMFS_DIR}/usr/share/keel/images"
+        echo "  Removed pre-loaded container images"
+    fi
+
+    # Write edge variant marker
+    mkdir -p "${INITRAMFS_DIR}/etc/keel"
+    echo "edge" > "${INITRAMFS_DIR}/etc/keel/variant"
+    echo "  Edge optimizations applied"
+fi
+
+# Write variant metadata (if not already written)
+if [ -n "${VARIANT_NAME:-}" ]; then
+    mkdir -p "${INITRAMFS_DIR}/etc/keel"
+    if [ ! -f "${INITRAMFS_DIR}/etc/keel/variant" ]; then
+        echo "${VARIANT_NAME}" > "${INITRAMFS_DIR}/etc/keel/variant"
+    fi
 fi
 
 # Create essential devices (if not using devtmpfs)
