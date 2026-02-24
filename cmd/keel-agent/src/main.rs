@@ -238,9 +238,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_rollback_supervisor(rb_health, rb_scheduler).await;
     });
 
+    // Initialize audit logging
+    let audit_log = keel_agent::audit::AuditLog::new("/var/lib/keel/audit/audit.log");
+    let audit_layer = keel_agent::audit::AuditLayer::new(audit_log);
+    info!("Audit logging enabled");
+
     // Start gRPC server
     info!(addr = %grpc_addr, "Starting gRPC server");
     let grpc_server = builder
+        .layer(audit_layer)
         .add_service(NodeServiceServer::new(node_service))
         .serve(grpc_addr);
 

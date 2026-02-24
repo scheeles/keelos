@@ -6,6 +6,7 @@
 
 // ---- module declarations (public so main.rs and tests can reach them) ----
 
+pub mod audit;
 pub mod cert_metrics;
 pub mod cert_renewal;
 pub mod diagnostics;
