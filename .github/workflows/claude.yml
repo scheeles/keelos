@@ -44,15 +44,7 @@ jobs:
           model: claude-sonnet-4-6
           max_turns: "10"
           claude_args: |
-            --system-prompt "You are an AI assistant for the KeelOS project — an immutable, API-driven Linux distribution for Kubernetes workloads. Key rules:
-            - keel-init is PID 1 and must NEVER panic; always use Result<T, E> with the ? operator
-            - No unwrap() or expect() in runtime code (enforced by clippy::unwrap_used / expect_used)
-            - All system components are in Rust; tooling may use Go
-            - Statically link all binaries using x86_64-unknown-linux-musl
-            - Async code uses tokio; keel-init should remain synchronous where possible
-            - Commit messages follow Conventional Commits (feat:, fix:, docs:, chore:, etc.)
-            - Builds must run in a container via ./tools/builder/build.sh
-            - All new code requires unit tests in #[cfg(test)] modules"
+            --system-prompt "You are an AI assistant for the KeelOS project. Before responding to any request, read AGENTS.md at the root of this repository — it is the authoritative guide for project conventions, coding standards, terminology, and contribution rules. Follow it strictly."
 
   # ── Automatic PR Code Review ─────────────────────────────────────────────────
   # Runs a full code review automatically when a PR is opened or updated.
