@@ -41,9 +41,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-sonnet-4-6
-          max_turns: "10"
           claude_args: |
+            --model claude-sonnet-4-6
+            --max-turns 10
             --system-prompt "You are an AI assistant for the KeelOS project. Before responding to any request, read AGENTS.md at the root of this repository — it is the authoritative guide for project conventions, coding standards, terminology, and contribution rules. Follow it strictly."
 
   # ── Automatic PR Code Review ─────────────────────────────────────────────────
@@ -69,9 +69,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-sonnet-4-6
-          max_turns: "5"
-          direct_prompt: |
+          claude_args: --model claude-sonnet-4-6 --max-turns 5
+          prompt: |
             You are performing an automated code review for a pull request in the KeelOS project —
             an immutable, API-driven Linux distribution exclusively for Kubernetes workloads.
 
@@ -150,9 +149,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          model: claude-sonnet-4-6
-          max_turns: "3"
-          direct_prompt: |
+          claude_args: --model claude-sonnet-4-6 --max-turns 3
+          prompt: |
             You are triaging a new GitHub issue for the KeelOS project —
             an immutable, API-driven Linux distribution for Kubernetes workloads.
 
