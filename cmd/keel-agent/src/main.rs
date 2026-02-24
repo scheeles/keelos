@@ -940,25 +940,52 @@ impl NodeService for HelperNodeService {
 /// Parse a raw log line and apply filters.
 /// Returns `None` if the line doesn't match filters.
 fn parse_log_line(line: &str, level_filter: &str, component_filter: &str) -> Option<LogEntry> {
-    // Simple parsing: dmesg lines are like "2024-01-01T00:00:00,000000+00:00 component: message"
-    let entry = LogEntry {
-        timestamp: chrono::Utc::now().to_rfc3339(),
-        level: "info".to_string(),
-        component: "kernel".to_string(),
-        message: line.to_string(),
+    // dmesg --time-format=iso lines look like:
+    //   "2024-01-01T00:00:00,000000+00:00 kern.warn: something happened"
+    // Try to extract timestamp and level from the line
+    let (timestamp, level, message) = if let Some((ts, rest)) = line.split_once(' ') {
+        // Try to extract facility.level prefix (e.g. "kern.warn:")
+        if let Some((facility_level, msg)) = rest.split_once(": ") {
+            let level = if let Some((_, lvl)) = facility_level.split_once('.') {
+                match lvl {
+                    "emerg" | "alert" | "crit" | "err" => "error",
+                    "warn" | "warning" => "warn",
+                    "notice" | "info" => "info",
+                    "debug" => "debug",
+                    _ => "info",
+                }
+            } else {
+                "info"
+            };
+            (ts.to_string(), level.to_string(), msg.to_string())
+        } else {
+            (ts.to_string(), "info".to_string(), rest.to_string())
+        }
+    } else {
+        (
+            chrono::Utc::now().to_rfc3339(),
+            "info".to_string(),
+            line.to_string(),
+        )
     };
 
     // Apply level filter if specified
-    if !level_filter.is_empty() && entry.level != level_filter {
+    if !level_filter.is_empty() && level != level_filter {
         return None;
     }
 
-    // Apply component filter if specified
-    if !component_filter.is_empty() && entry.component != component_filter {
+    // Apply component filter if specified (kernel logs always have component "kernel")
+    let component = "kernel".to_string();
+    if !component_filter.is_empty() && component != component_filter {
         return None;
     }
 
-    Some(entry)
+    Some(LogEntry {
+        timestamp,
+        level,
+        component,
+        message,
+    })
 }
 
 /// Initialize operational certificates if running in Kubernetes

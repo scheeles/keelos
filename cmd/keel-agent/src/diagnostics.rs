@@ -252,7 +252,7 @@ pub fn create_system_snapshot(
         // Capture hostname
         match std::fs::read_to_string("/etc/hostname") {
             Ok(hostname) => {
-                content.push_str(&format!("Hostname: {hostname}"));
+                content.push_str(&format!("Hostname: {}\n", hostname.trim()));
             }
             Err(_) => content.push_str("Hostname: unavailable\n"),
         }
