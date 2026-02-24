@@ -446,7 +446,9 @@ mod tests {
     fn test_collect_crash_dump_creates_file() {
         let tmp_dir =
             std::env::temp_dir().join(format!("keel-test-crash-{}", uuid::Uuid::new_v4()));
-        let dump_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-crash");
+        let dump_dir = tmp_dir
+            .to_str()
+            .unwrap_or_else(|| panic!("temp dir path is not valid UTF-8"));
 
         let result = collect_crash_dump_to(dump_dir, false, false);
         assert!(result.is_ok());
@@ -469,7 +471,9 @@ mod tests {
     fn test_collect_crash_dump_with_kernel() {
         let tmp_dir =
             std::env::temp_dir().join(format!("keel-test-crash-k-{}", uuid::Uuid::new_v4()));
-        let dump_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-crash-k");
+        let dump_dir = tmp_dir
+            .to_str()
+            .unwrap_or_else(|| panic!("temp dir path is not valid UTF-8"));
 
         let result = collect_crash_dump_to(dump_dir, true, false);
         assert!(result.is_ok());
@@ -486,7 +490,9 @@ mod tests {
     fn test_collect_crash_dump_with_userspace() {
         let tmp_dir =
             std::env::temp_dir().join(format!("keel-test-crash-u-{}", uuid::Uuid::new_v4()));
-        let dump_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-crash-u");
+        let dump_dir = tmp_dir
+            .to_str()
+            .unwrap_or_else(|| panic!("temp dir path is not valid UTF-8"));
 
         let result = collect_crash_dump_to(dump_dir, false, true);
         assert!(result.is_ok());
@@ -503,7 +509,9 @@ mod tests {
     #[test]
     fn test_create_system_snapshot_creates_file() {
         let tmp_dir = std::env::temp_dir().join(format!("keel-test-snap-{}", uuid::Uuid::new_v4()));
-        let snap_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-snap");
+        let snap_dir = tmp_dir
+            .to_str()
+            .unwrap_or_else(|| panic!("temp dir path is not valid UTF-8"));
 
         let result = create_system_snapshot_to(snap_dir, "test-label", false, false);
         assert!(result.is_ok());
@@ -528,7 +536,9 @@ mod tests {
     fn test_create_system_snapshot_with_config() {
         let tmp_dir =
             std::env::temp_dir().join(format!("keel-test-snap-c-{}", uuid::Uuid::new_v4()));
-        let snap_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-snap-c");
+        let snap_dir = tmp_dir
+            .to_str()
+            .unwrap_or_else(|| panic!("temp dir path is not valid UTF-8"));
 
         let result = create_system_snapshot_to(snap_dir, "config-snap", true, false);
         assert!(result.is_ok());
@@ -546,7 +556,9 @@ mod tests {
     fn test_create_system_snapshot_with_logs() {
         let tmp_dir =
             std::env::temp_dir().join(format!("keel-test-snap-l-{}", uuid::Uuid::new_v4()));
-        let snap_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-snap-l");
+        let snap_dir = tmp_dir
+            .to_str()
+            .unwrap_or_else(|| panic!("temp dir path is not valid UTF-8"));
 
         let result = create_system_snapshot_to(snap_dir, "log-snap", false, true);
         assert!(result.is_ok());
