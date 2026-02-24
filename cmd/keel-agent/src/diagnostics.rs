@@ -40,6 +40,12 @@ pub struct DiagnosticsManager {
     recovery_session: Arc<RwLock<Option<RecoverySession>>>,
 }
 
+impl Default for DiagnosticsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiagnosticsManager {
     /// Creates a new `DiagnosticsManager`.
     pub fn new() -> Self {
