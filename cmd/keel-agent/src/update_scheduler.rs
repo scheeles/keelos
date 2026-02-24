@@ -149,18 +149,75 @@ impl UpdateScheduler {
         schedules.get(id).cloned()
     }
 
-    /// Mark the latest schedule as RolledBack
+    /// Mark the latest completed or running schedule as `RolledBack`
+    ///
+    /// Finds the most recently started schedule in `Completed` or `Running` status
+    /// and transitions it to `RolledBack` with the given reason.
     pub async fn register_rollback(&self, reason: &str) -> Result<(), String> {
-        // let mut schedules = self.schedules.write().await;
-        // Find the most recent non-pending schedule
-        // In a real implementation we might look for specific IDs or "Pending/Running" that finished recently
-        // Here we just look for the last created one? Or maybe we can't easily associate without state.
-        // We'll simplisticly look for the last modified one.
+        let mut schedules = self.schedules.write().await;
 
-        // Actually, better to just log a system-wide event or find a "Completed" one and mark it RolledBack.
-        // For now, let's just log it if we find a recent one.
-        info!("Registering rollback event: {}", reason);
+        // Find the most recently started schedule in Completed or Running status
+        let target_id = schedules
+            .values()
+            .filter(|s| {
+                s.status == ScheduleStatus::Completed || s.status == ScheduleStatus::Running
+            })
+            .max_by_key(|s| s.started_at)
+            .map(|s| s.id.clone());
+
+        if let Some(id) = target_id {
+            if let Some(schedule) = schedules.get_mut(&id) {
+                schedule.rollback_triggered = true;
+                schedule.rollback_reason = Some(reason.to_string());
+                schedule.status = ScheduleStatus::RolledBack;
+                schedule.completed_at = Some(Utc::now());
+                info!(schedule_id = %id, reason = %reason, "Registered rollback for schedule");
+            }
+            drop(schedules);
+            self.persist_schedules().await?;
+        } else {
+            info!(reason = %reason, "No recent schedule found for rollback registration");
+        }
+
         Ok(())
+    }
+
+    /// Get the most recently completed or running schedule
+    ///
+    /// Used by the rollback supervisor to check `enable_auto_rollback` on the
+    /// latest update.
+    pub async fn get_latest_active_schedule(&self) -> Option<UpdateSchedule> {
+        let schedules = self.schedules.read().await;
+        schedules
+            .values()
+            .filter(|s| {
+                s.status == ScheduleStatus::Completed || s.status == ScheduleStatus::Running
+            })
+            .max_by_key(|s| s.started_at)
+            .cloned()
+    }
+
+    /// Check whether a schedule is still within its maintenance window
+    ///
+    /// Returns `true` if the schedule has no maintenance window configured or if
+    /// the current time falls within `scheduled_at + maintenance_window_secs`.
+    pub fn is_within_maintenance_window(schedule: &UpdateSchedule) -> bool {
+        let Some(scheduled_at) = schedule.scheduled_at else {
+            return true; // No scheduled time means execute immediately
+        };
+
+        let Some(window_secs) = schedule.maintenance_window_secs else {
+            return true; // No maintenance window means no restriction
+        };
+
+        if window_secs == 0 {
+            return true;
+        }
+
+        let window_end = scheduled_at + chrono::Duration::seconds(i64::from(window_secs));
+        let now = Utc::now();
+
+        now <= window_end
     }
 
     /// Cancel a scheduled update
@@ -358,5 +415,247 @@ mod tests {
 
         // Cleanup
         let _ = fs::remove_file("/tmp/test-cancel-schedules.json");
+    }
+
+    #[tokio::test]
+    async fn test_register_rollback() {
+        let scheduler = UpdateScheduler::new("/tmp/test-register-rollback.json");
+
+        let schedule = scheduler
+            .schedule_update(
+                "http://example.com/update.squashfs".to_string(),
+                None,
+                Some(Utc::now()),
+                None,
+                true,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // Mark as running then completed
+        scheduler
+            .update_status(&schedule.id, ScheduleStatus::Running, None)
+            .await
+            .unwrap();
+        scheduler
+            .update_status(&schedule.id, ScheduleStatus::Completed, None)
+            .await
+            .unwrap();
+
+        // Register rollback
+        scheduler
+            .register_rollback("Health check failure")
+            .await
+            .unwrap();
+
+        let updated = scheduler.get_schedule(&schedule.id).await.unwrap();
+        assert_eq!(updated.status, ScheduleStatus::RolledBack);
+        assert!(updated.rollback_triggered);
+        assert_eq!(
+            updated.rollback_reason.as_deref(),
+            Some("Health check failure")
+        );
+
+        // Cleanup
+        let _ = fs::remove_file("/tmp/test-register-rollback.json");
+    }
+
+    #[tokio::test]
+    async fn test_register_rollback_no_schedule() {
+        let scheduler = UpdateScheduler::new("/tmp/test-register-rollback-none.json");
+
+        // No schedules exist; should succeed without error
+        scheduler.register_rollback("Some reason").await.unwrap();
+
+        // Cleanup
+        let _ = fs::remove_file("/tmp/test-register-rollback-none.json");
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_active_schedule() {
+        let scheduler = UpdateScheduler::new("/tmp/test-latest-active.json");
+
+        let s1 = scheduler
+            .schedule_update(
+                "http://example.com/v1.squashfs".to_string(),
+                None,
+                Some(Utc::now()),
+                None,
+                false,
+                None,
+                None,
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .unwrap();
+
+        let s2 = scheduler
+            .schedule_update(
+                "http://example.com/v2.squashfs".to_string(),
+                None,
+                Some(Utc::now()),
+                None,
+                true,
+                Some(120),
+                None,
+                None,
+                false,
+                false,
+                None,
+            )
+            .await
+            .unwrap();
+
+        // No completed schedules yet
+        assert!(scheduler.get_latest_active_schedule().await.is_none());
+
+        // Complete s1
+        scheduler
+            .update_status(&s1.id, ScheduleStatus::Running, None)
+            .await
+            .unwrap();
+        scheduler
+            .update_status(&s1.id, ScheduleStatus::Completed, None)
+            .await
+            .unwrap();
+
+        // Complete s2 (later)
+        scheduler
+            .update_status(&s2.id, ScheduleStatus::Running, None)
+            .await
+            .unwrap();
+        scheduler
+            .update_status(&s2.id, ScheduleStatus::Completed, None)
+            .await
+            .unwrap();
+
+        // Latest should be s2
+        let latest = scheduler.get_latest_active_schedule().await.unwrap();
+        assert_eq!(latest.id, s2.id);
+        assert!(latest.enable_auto_rollback);
+
+        // Cleanup
+        let _ = fs::remove_file("/tmp/test-latest-active.json");
+    }
+
+    #[test]
+    fn test_maintenance_window_no_schedule_time() {
+        let schedule = UpdateSchedule {
+            id: "test".to_string(),
+            source_url: String::new(),
+            expected_sha256: None,
+            scheduled_at: None,
+            maintenance_window_secs: Some(3600),
+            enable_auto_rollback: false,
+            health_check_timeout_secs: None,
+            pre_update_hook: None,
+            post_update_hook: None,
+            is_delta: false,
+            fallback_to_full: false,
+            full_image_url: None,
+            rollback_triggered: false,
+            rollback_reason: None,
+            status: ScheduleStatus::Pending,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+            error_message: None,
+        };
+
+        // No scheduled_at means always within window
+        assert!(UpdateScheduler::is_within_maintenance_window(&schedule));
+    }
+
+    #[test]
+    fn test_maintenance_window_no_window_configured() {
+        let schedule = UpdateSchedule {
+            id: "test".to_string(),
+            source_url: String::new(),
+            expected_sha256: None,
+            scheduled_at: Some(Utc::now() - chrono::Duration::hours(2)),
+            maintenance_window_secs: None,
+            enable_auto_rollback: false,
+            health_check_timeout_secs: None,
+            pre_update_hook: None,
+            post_update_hook: None,
+            is_delta: false,
+            fallback_to_full: false,
+            full_image_url: None,
+            rollback_triggered: false,
+            rollback_reason: None,
+            status: ScheduleStatus::Pending,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+            error_message: None,
+        };
+
+        // No maintenance_window_secs means no restriction
+        assert!(UpdateScheduler::is_within_maintenance_window(&schedule));
+    }
+
+    #[test]
+    fn test_maintenance_window_within() {
+        let schedule = UpdateSchedule {
+            id: "test".to_string(),
+            source_url: String::new(),
+            expected_sha256: None,
+            scheduled_at: Some(Utc::now() - chrono::Duration::minutes(10)),
+            maintenance_window_secs: Some(3600),
+            enable_auto_rollback: false,
+            health_check_timeout_secs: None,
+            pre_update_hook: None,
+            post_update_hook: None,
+            is_delta: false,
+            fallback_to_full: false,
+            full_image_url: None,
+            rollback_triggered: false,
+            rollback_reason: None,
+            status: ScheduleStatus::Pending,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+            error_message: None,
+        };
+
+        // 10 minutes into a 1-hour window
+        assert!(UpdateScheduler::is_within_maintenance_window(&schedule));
+    }
+
+    #[test]
+    fn test_maintenance_window_expired() {
+        let schedule = UpdateSchedule {
+            id: "test".to_string(),
+            source_url: String::new(),
+            expected_sha256: None,
+            scheduled_at: Some(Utc::now() - chrono::Duration::hours(2)),
+            maintenance_window_secs: Some(3600),
+            enable_auto_rollback: false,
+            health_check_timeout_secs: None,
+            pre_update_hook: None,
+            post_update_hook: None,
+            is_delta: false,
+            fallback_to_full: false,
+            full_image_url: None,
+            rollback_triggered: false,
+            rollback_reason: None,
+            status: ScheduleStatus::Pending,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+            error_message: None,
+        };
+
+        // 2 hours past a 1-hour window
+        assert!(!UpdateScheduler::is_within_maintenance_window(&schedule));
     }
 }

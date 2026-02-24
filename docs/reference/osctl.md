@@ -142,6 +142,9 @@ osctl diag debug-status
 # Collect crash dump (kernel + userspace)
 osctl diag crash-dump [--kernel true] [--userspace true]
 
+# Analyze a previously collected crash dump
+osctl diag analyze-dump --path <dump-file-path>
+
 # Stream logs with filters
 osctl diag logs [--level <level>] [--component <name>] [--tail <n>]
 
@@ -166,6 +169,12 @@ Collects kernel messages (dmesg) and userspace process information.
 *   `--userspace`: Include userspace process info (default: `true`).
 
 Dumps are saved to `/var/lib/keel/crash-dumps/` on the target node.
+
+#### `diag analyze-dump`
+Analyzes a previously collected crash dump file for known failure patterns.
+*   `--path`: Path to the crash dump file on the target node (required).
+
+Reports an overall severity (`critical`, `error`, `warning`, `clean`) and individual findings with their type and matching log line. Detected patterns include OOM kills, kernel panics, segfaults, I/O errors, and stack traces.
 
 #### `diag logs`
 Streams system logs with optional filtering.

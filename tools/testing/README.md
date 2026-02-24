@@ -38,6 +38,7 @@ End-to-end tests for the diagnostics and debugging tools. Boots KeelOS in QEMU a
 *   **Debug Mode**: Enable/disable time-limited debug sessions, verify status, and duplicate rejection.
 *   **Recovery Mode**: Enable emergency recovery mode via API.
 *   **Crash Dump**: Collect kernel + userspace crash dump and verify output.
+*   **Crash Dump Analysis**: Collect a dump, then analyze it with `osctl diag analyze-dump` and verify severity and summary fields.
 *   **System Snapshot**: Create a system snapshot with config and logs.
 
 Each test runs in an isolated QEMU instance with a unique gRPC port.
