@@ -32,6 +32,16 @@ Runs detailed end-to-end scenarios:
 *   **Update Flow**: Tests the A/B partition swap and OTA update mechanism.
 *   **Integration**: Verifies that `keel-agent` allows `osctl` connections and can spawn containers.
 
+### `test-diagnostics.sh`
+
+End-to-end tests for the diagnostics and debugging tools. Boots KeelOS in QEMU and uses `osctl diag` commands to verify:
+*   **Debug Mode**: Enable/disable time-limited debug sessions, verify status, and duplicate rejection.
+*   **Recovery Mode**: Enable emergency recovery mode via API.
+*   **Crash Dump**: Collect kernel + userspace crash dump and verify output.
+*   **System Snapshot**: Create a system snapshot with config and logs.
+
+Each test runs in an isolated QEMU instance with a unique gRPC port.
+
 ## Setup
 
 ### `setup-test-disk.sh`

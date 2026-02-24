@@ -113,6 +113,30 @@ osctl --endpoint http://127.0.0.1:50052 network dns set \
   --nameserver 8.8.8.8 --nameserver 1.1.1.1
 ```
 
+### Diagnostics & Debugging
+
+```bash
+# Enable time-limited debug mode (15 min default)
+osctl --endpoint http://127.0.0.1:50052 diag debug --reason "Investigating issue"
+
+# Check debug mode status
+osctl --endpoint http://127.0.0.1:50052 diag debug-status
+
+# Collect crash dump (kernel + userspace)
+osctl --endpoint http://127.0.0.1:50052 diag crash-dump
+
+# Stream logs filtered by level
+osctl --endpoint http://127.0.0.1:50052 diag logs --level error
+
+# Create system snapshot
+osctl --endpoint http://127.0.0.1:50052 diag snapshot --label "pre-upgrade"
+
+# Enable recovery mode
+osctl --endpoint http://127.0.0.1:50052 diag recovery --reason "Emergency repair"
+```
+
+For detailed diagnostics workflows, see the [Diagnostics Guide](guides/diagnostics.md).
+
 ## Authentication
 
 `osctl` supports mutual TLS (mTLS) for secure communication with `keel-agent`. Certificates are managed automatically via a local cert store.

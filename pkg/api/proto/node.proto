@@ -50,6 +50,24 @@ service NodeService {
   
   // Get runtime network status (link state, IP addresses, statistics)
   rpc GetNetworkStatus (GetNetworkStatusRequest) returns (GetNetworkStatusResponse);
+
+  // Enable time-limited, audit-logged debug mode
+  rpc EnableDebugMode (EnableDebugModeRequest) returns (EnableDebugModeResponse);
+
+  // Get current debug mode status
+  rpc GetDebugStatus (GetDebugStatusRequest) returns (GetDebugStatusResponse);
+
+  // Collect crash dump (kernel + userspace)
+  rpc CollectCrashDump (CollectCrashDumpRequest) returns (CollectCrashDumpResponse);
+
+  // Stream debug logs with filtering support
+  rpc StreamLogs (StreamLogsRequest) returns (stream LogEntry);
+
+  // Create a system snapshot/backup via API
+  rpc CreateSystemSnapshot (CreateSystemSnapshotRequest) returns (CreateSystemSnapshotResponse);
+
+  // Enable emergency recovery mode
+  rpc EnableRecoveryMode (EnableRecoveryModeRequest) returns (EnableRecoveryModeResponse);
 }
 
 message InstallUpdateRequest {
@@ -456,4 +474,112 @@ message InterfaceStatistics {
   
   // Transmit errors
   uint64 tx_errors = 6;
+}
+
+// Diagnostics & Debugging messages
+
+message EnableDebugModeRequest {
+  // Duration in seconds for the debug session (max 3600)
+  uint32 duration_secs = 1;
+
+  // Reason for enabling debug mode (audit log)
+  string reason = 2;
+}
+
+message EnableDebugModeResponse {
+  bool success = 1;
+  string message = 2;
+  // Session ID for tracking the debug session
+  string session_id = 3;
+  // When the debug session expires (RFC3339)
+  string expires_at = 4;
+}
+
+message GetDebugStatusRequest {}
+
+message GetDebugStatusResponse {
+  // Whether debug mode is currently active
+  bool enabled = 1;
+  // Current session ID (empty if not active)
+  string session_id = 2;
+  // When the session expires (RFC3339, empty if not active)
+  string expires_at = 3;
+  // Who enabled it
+  string reason = 4;
+  // Remaining seconds
+  uint32 remaining_secs = 5;
+}
+
+message CollectCrashDumpRequest {
+  // Include kernel crash data (dmesg, etc.)
+  bool include_kernel = 1;
+  // Include userspace process info
+  bool include_userspace = 2;
+}
+
+message CollectCrashDumpResponse {
+  bool success = 1;
+  string message = 2;
+  // Path where crash dump was saved
+  string dump_path = 3;
+  // Size of the dump in bytes
+  uint64 dump_size_bytes = 4;
+  // Timestamp of the dump (RFC3339)
+  string created_at = 5;
+}
+
+message StreamLogsRequest {
+  // Filter by log level ("debug", "info", "warn", "error")
+  string level = 1;
+  // Filter by component name (e.g. "keel-agent", "keel-init", "kubelet")
+  string component = 2;
+  // Number of historical lines to include before streaming
+  uint32 tail_lines = 3;
+}
+
+message LogEntry {
+  // Log timestamp (RFC3339)
+  string timestamp = 1;
+  // Log level
+  string level = 2;
+  // Component that produced the log
+  string component = 3;
+  // Log message
+  string message = 4;
+}
+
+message CreateSystemSnapshotRequest {
+  // Human-readable label for the snapshot
+  string label = 1;
+  // Include system configuration files
+  bool include_config = 2;
+  // Include logs
+  bool include_logs = 3;
+}
+
+message CreateSystemSnapshotResponse {
+  bool success = 1;
+  string message = 2;
+  // Unique snapshot identifier
+  string snapshot_id = 3;
+  // Path where the snapshot was created
+  string snapshot_path = 4;
+  // Size in bytes
+  uint64 size_bytes = 5;
+  // Creation timestamp (RFC3339)
+  string created_at = 6;
+}
+
+message EnableRecoveryModeRequest {
+  // Reason for enabling recovery mode (audit log)
+  string reason = 1;
+  // Duration in seconds for recovery mode (max 3600)
+  uint32 duration_secs = 2;
+}
+
+message EnableRecoveryModeResponse {
+  bool success = 1;
+  string message = 2;
+  // When recovery mode expires (RFC3339)
+  string expires_at = 3;
 }
