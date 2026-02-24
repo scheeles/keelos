@@ -150,4 +150,18 @@ osctl init bootstrap --node <NODE_IP>
 
 After this, all subsequent `osctl` commands automatically use mTLS. The certificates are stored locally and `osctl` will select the best available certificate (preferring operational over bootstrap) on each connection.
 
+## Authorization (RBAC)
+
+When mTLS is enabled, `keel-agent` enforces role-based access control based on the client certificate's Organization (O) field:
+
+| Role | Certificate Organization (O) | Example Commands |
+|------|-------------------------------|-----------------|
+| **Admin** | `system:masters` or `keel:admin` | `reboot`, `rollback trigger`, `diag debug` |
+| **Operator** | `keel:operator` | `update`, `diag snapshot`, `diag crash-dump` |
+| **Viewer** | `keel:viewer` | `status`, `health`, `diag debug-status` |
+
+Without mTLS (development mode), all requests are allowed regardless of role.
+
+For detailed RBAC documentation, see the [RBAC Guide](guides/rbac.md).
+
 For full CLI reference, see [osctl Reference](docs/reference/osctl.md).

@@ -42,6 +42,16 @@ End-to-end tests for the diagnostics and debugging tools. Boots KeelOS in QEMU a
 
 Each test runs in an isolated QEMU instance with a unique gRPC port.
 
+### `test-rbac.sh`
+
+End-to-end tests for RBAC (Role-Based Access Control) on gRPC endpoints. Verifies that the three role levels (Viewer, Operator, Admin) are correctly enforced:
+*   **Viewer endpoints**: `GetStatus`, `GetHealth`, `GetDebugStatus` — read-only access.
+*   **Operator endpoints**: `CreateSnapshot` — operational tasks.
+*   **Admin endpoints**: `Reboot`, `EnableDebugMode` — dangerous operations.
+*   **RBAC-exempt**: `InitBootstrap` — unauthenticated bootstrap flow.
+
+Without mTLS, all endpoints are accessible (development mode). Each test runs in an isolated QEMU instance with a unique gRPC port.
+
 ## Setup
 
 ### `setup-test-disk.sh`
