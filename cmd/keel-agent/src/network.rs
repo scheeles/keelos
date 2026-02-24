@@ -372,17 +372,16 @@ pub async fn get_network_status(
                     }
                 }
 
-                // Get IPv6 addresses using ip command
+                // Get IPv6 addresses with detailed info using ip command
                 if let Ok(output) = std::process::Command::new("/bin/ip")
                     .args(["-6", "addr", "show", iface_name])
                     .output()
                 {
                     if let Ok(stdout) = String::from_utf8(output.stdout) {
                         for line in stdout.lines() {
-                            if line.trim().starts_with("inet6 ") {
-                                if let Some(addr) = line.split_whitespace().nth(1) {
-                                    iface_status.ipv6_addresses.push(addr.to_string());
-                                }
+                            if let Some(info) = parse_ipv6_address_line(line) {
+                                iface_status.ipv6_addresses.push(info.address.clone());
+                                iface_status.ipv6_address_info.push(info);
                             }
                         }
                     }
@@ -438,4 +437,55 @@ pub async fn get_network_status(
     }
 
     Ok(Response::new(GetNetworkStatusResponse { interfaces }))
+}
+
+/// Parse a single line from `ip -6 addr show` output
+/// Example: "    inet6 2001:db8::1/64 scope global dynamic"
+/// Example: "    inet6 fe80::a00:27ff:fe4e:66a1/64 scope link"
+fn parse_ipv6_address_line(line: &str) -> Option<IPv6AddressInfo> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with("inet6 ") {
+        return None;
+    }
+
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    // Parse address and prefix length (e.g., "2001:db8::1/64")
+    let addr_with_prefix = parts[1];
+    let (address, prefix_len) = if let Some(pos) = addr_with_prefix.find('/') {
+        let addr = &addr_with_prefix[..pos];
+        let prefix = addr_with_prefix[pos + 1..].parse::<u32>().unwrap_or(128);
+        (addr.to_string(), prefix)
+    } else {
+        (addr_with_prefix.to_string(), 128)
+    };
+
+    // Extract scope (look for "scope <value>")
+    let scope = parts
+        .iter()
+        .position(|&p| p == "scope")
+        .and_then(|i| parts.get(i + 1))
+        .unwrap_or(&"unknown")
+        .to_string();
+
+    // Extract flags (everything after scope that's not a keyword)
+    let mut flags = Vec::new();
+    if let Some(scope_pos) = parts.iter().position(|&p| p == "scope") {
+        for flag in &parts[scope_pos + 2..] {
+            // Common flags: dynamic, permanent, temporary, deprecated, etc.
+            if !flag.is_empty() {
+                flags.push(flag.to_string());
+            }
+        }
+    }
+
+    Some(IPv6AddressInfo {
+        address,
+        prefix_len,
+        scope,
+        flags,
+    })
 }
