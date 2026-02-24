@@ -1,10 +1,10 @@
 use clap::{Parser, Subcommand};
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::{
-    BootstrapKubernetesRequest, ConfigureNetworkRequest, DhcpConfig, DnsConfig,
-    GetBootstrapStatusRequest, GetHealthRequest, GetNetworkConfigRequest, GetNetworkStatusRequest,
-    CollectCrashDumpRequest, CreateSystemSnapshotRequest, DisableDebugModeRequest,
-    EnableDebugModeRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
+    BootstrapKubernetesRequest, CollectCrashDumpRequest, ConfigureNetworkRequest,
+    CreateSystemSnapshotRequest, DhcpConfig, DisableDebugModeRequest, DnsConfig,
+    EnableDebugModeRequest, GetBootstrapStatusRequest, GetHealthRequest, GetNetworkConfigRequest,
+    GetNetworkStatusRequest, GetRollbackHistoryRequest, GetStatusRequest, InitBootstrapRequest,
     InstallUpdateRequest, NetworkInterface, RebootRequest, StaticConfig, StreamLogsRequest,
     TriggerRollbackRequest,
 };
@@ -567,7 +567,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if c.filename != current_filename {
                     current_filename = c.filename.clone();
                     let path = output.join(&current_filename);
-                    println!("📥 Receiving crash dump: {} ({:.2} MB)", current_filename, c.total_size as f64 / 1_048_576.0);
+                    println!(
+                        "📥 Receiving crash dump: {} ({:.2} MB)",
+                        current_filename,
+                        c.total_size as f64 / 1_048_576.0
+                    );
                     current_file = Some(std::fs::File::create(path)?);
                 }
                 if let Some(ref mut f) = current_file {
@@ -597,13 +601,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 file.write_all(&c.data)?;
                 total_received += c.data.len() as u64;
                 if c.total_size > 0 {
-                    print!("\rProgress: {:.1}%", (total_received as f64 / c.total_size as f64) * 100.0);
+                    print!(
+                        "\rProgress: {:.1}%",
+                        (total_received as f64 / c.total_size as f64) * 100.0
+                    );
                     std::io::stdout().flush()?;
                 }
             }
             println!("\n✅ Snapshot saved to: {}", output.display());
         }
-        Commands::Network { action } => match action {
+        Commands::Network { action } => {
+            match action {
                 NetworkAction::Config { action } => match action {
                     NetworkConfigAction::Set {
                         interface,
@@ -811,6 +819,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             }
         }
+    }
 
     Ok(())
 }

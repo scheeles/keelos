@@ -1,13 +1,13 @@
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use chrono::{DateTime, Utc, Duration};
-use tracing::{info, warn};
-use keel_api::node::{LogEntry, CrashDumpData, SnapshotData};
-use tokio::process::Command;
-use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader, AsyncReadExt};
 use async_stream::try_stream;
+use chrono::{DateTime, Duration, Utc};
+use keel_api::node::{CrashDumpData, LogEntry, SnapshotData};
+use std::process::Stdio;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::RwLock;
 use tokio_stream::Stream;
+use tracing::{info, warn};
 
 pub struct DebugMode {
     pub enabled: bool,
@@ -30,7 +30,11 @@ impl DiagnosticsManager {
         }
     }
 
-    pub async fn enable_debug_mode(&self, duration_mins: u32, reason: String) -> (bool, String, Option<DateTime<Utc>>) {
+    pub async fn enable_debug_mode(
+        &self,
+        duration_mins: u32,
+        reason: String,
+    ) -> (bool, String, Option<DateTime<Utc>>) {
         let mut mode = self.debug_mode.write().await;
         let expires_at = Utc::now() + Duration::minutes(duration_mins as i64);
 
@@ -40,7 +44,11 @@ impl DiagnosticsManager {
 
         info!(reason = %reason, expires_at = %expires_at.to_rfc3339(), "Debug mode enabled");
 
-        (true, format!("Debug mode enabled for {} minutes", duration_mins), Some(expires_at))
+        (
+            true,
+            format!("Debug mode enabled for {} minutes", duration_mins),
+            Some(expires_at),
+        )
     }
 
     pub async fn disable_debug_mode(&self, reason: String) -> bool {
@@ -69,7 +77,12 @@ impl DiagnosticsManager {
         false
     }
 
-    pub fn stream_logs(&self, filter: String, follow: bool, tail: u32) -> impl Stream<Item = Result<LogEntry, tonic::Status>> {
+    pub fn stream_logs(
+        &self,
+        filter: String,
+        follow: bool,
+        tail: u32,
+    ) -> impl Stream<Item = Result<LogEntry, tonic::Status>> {
         try_stream! {
             let _: () = (); // Help inference
             let mut args = vec!["-o", "short-iso"];
@@ -117,9 +130,14 @@ impl DiagnosticsManager {
         }
     }
 
-    pub fn collect_crash_dumps(&self, since: String) -> impl Stream<Item = Result<CrashDumpData, tonic::Status>> {
+    pub fn collect_crash_dumps(
+        &self,
+        since: String,
+    ) -> impl Stream<Item = Result<CrashDumpData, tonic::Status>> {
         let since_dt = if !since.is_empty() {
-            DateTime::parse_from_rfc3339(&since).ok().map(|dt| dt.with_timezone(&Utc))
+            DateTime::parse_from_rfc3339(&since)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
         } else {
             None
         };
@@ -161,7 +179,11 @@ impl DiagnosticsManager {
         }
     }
 
-    pub fn create_system_snapshot(&self, include_logs: bool, include_config: bool) -> impl Stream<Item = Result<SnapshotData, tonic::Status>> {
+    pub fn create_system_snapshot(
+        &self,
+        include_logs: bool,
+        include_config: bool,
+    ) -> impl Stream<Item = Result<SnapshotData, tonic::Status>> {
         try_stream! {
             let _: () = (); // Help inference
             let snapshot_id = uuid::Uuid::new_v4();

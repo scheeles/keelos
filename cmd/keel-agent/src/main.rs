@@ -784,11 +784,12 @@ impl NodeService for HelperNodeService {
         let stream = self.diagnostics_manager.collect_crash_dumps(req.since);
 
         Ok(Response::new(
-            Box::pin(stream) as Self::CollectCrashDumpStream,
+            Box::pin(stream) as Self::CollectCrashDumpStream
         ))
     }
 
-    type CreateSystemSnapshotStream = Pin<Box<dyn Stream<Item = Result<SnapshotData, Status>> + Send>>;
+    type CreateSystemSnapshotStream =
+        Pin<Box<dyn Stream<Item = Result<SnapshotData, Status>> + Send>>;
 
     async fn create_system_snapshot(
         &self,
@@ -800,7 +801,7 @@ impl NodeService for HelperNodeService {
             .create_system_snapshot(req.include_logs, req.include_config);
 
         Ok(Response::new(
-            Box::pin(stream) as Self::CreateSystemSnapshotStream,
+            Box::pin(stream) as Self::CreateSystemSnapshotStream
         ))
     }
 }
