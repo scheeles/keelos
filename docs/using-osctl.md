@@ -135,7 +135,7 @@ osctl --endpoint http://127.0.0.1:50052 diag snapshot --label "pre-upgrade"
 osctl --endpoint http://127.0.0.1:50052 diag recovery --reason "Emergency repair"
 ```
 
-For detailed diagnostics workflows, see the [Diagnostics Guide](docs/guides/diagnostics.md).
+For detailed diagnostics workflows, see the [Diagnostics Guide](guides/diagnostics.md).
 
 ## Authentication
 
