@@ -52,6 +52,7 @@ jobs:
             description: "Edge/IoT (Minimal)"
           - name: dev
             description: "Development (Debug)"
+        k8s_version: ["v1.30.0", "v1.31.0", "v1.32.0"]
     steps:
       - uses: actions/checkout@v6
 
@@ -62,8 +63,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-release-${{ github.sha }}
+          key: ${{ runner.os }}-buildx-release-${{ matrix.k8s_version }}-${{ github.sha }}
           restore-keys: |
+            ${{ runner.os }}-buildx-release-${{ matrix.k8s_version }}-
             ${{ runner.os }}-buildx-release-
             ${{ runner.os }}-buildx-
 
@@ -87,13 +89,14 @@ jobs:
             build/kernel
           key: ${{ runner.os }}-kernel-${{ matrix.variant.name }}-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/variants/*.conf') }}
 
-      - name: Build Builder Image
+      - name: Build Builder Image (K8s ${{ matrix.k8s_version }})
         uses: docker/build-push-action@v6
         with:
           context: ./tools/builder
           push: false
           load: true
           tags: keelos-builder:latest
+          build-args: K8S_VERSION=${{ matrix.k8s_version }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -102,7 +105,7 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Build ${{ matrix.variant.description }} Variant
+      - name: Build ${{ matrix.variant.description }} Variant (K8s ${{ matrix.k8s_version }})
         run: |
           mkdir -p target .cache/kernel build build/variants
           docker run --rm \
@@ -121,7 +124,7 @@ jobs:
       - name: Upload Variant Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: keelos-${{ matrix.variant.name }}
+          name: keelos-${{ matrix.variant.name }}-k8s-${{ matrix.k8s_version }}
           path: build/variants/${{ matrix.variant.name }}/keelos-*
           retention-days: 7
 
@@ -173,6 +176,7 @@ jobs:
           push: false
           load: true
           tags: keelos-builder:latest
+          build-args: K8S_VERSION=v1.32.0
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -341,8 +345,8 @@ jobs:
             -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) \
             -exec cp {} release/ \; 2>/dev/null || true
 
-          # Variant OS Images
-          for variant_dir in artifacts/keelos-cloud artifacts/keelos-bare-metal artifacts/keelos-edge artifacts/keelos-dev; do
+          # Variant OS Images (per K8s version)
+          for variant_dir in artifacts/keelos-cloud-k8s-* artifacts/keelos-bare-metal-k8s-* artifacts/keelos-edge-k8s-* artifacts/keelos-dev-k8s-*; do
             if [ -d "$variant_dir" ]; then
               find "$variant_dir" -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) \
                 -exec cp {} release/ \;

@@ -18,7 +18,7 @@ if ! docker image inspect "${IMAGE_NAME}" >/dev/null 2>&1; then
     
     # Simple build command matching build.sh logic
     HOST_ARCH=$(uname -m)
-    K8S_VERSION=${K8S_VERSION:-v1.29.0}
+    K8S_VERSION=${K8S_VERSION:-v1.32.0}
     if [[ "${HOST_ARCH}" == "arm64" ]] || [[ "${HOST_ARCH}" == "aarch64" ]]; then
         docker build --platform linux/arm64 --build-arg K8S_VERSION="${K8S_VERSION}" -t "${IMAGE_NAME}" "${PROJECT_ROOT}/tools/builder"
     else

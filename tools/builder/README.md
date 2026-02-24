@@ -55,3 +55,29 @@ All artifacts are output to the `build/` directory in the project root:
 
 *   `build/kernel/bzImage`: The bootable kernel.
 *   `build/initramfs.cpio.gz`: The root filesystem.
+
+## Kubernetes Version Configuration
+
+The default Kubernetes version is `v1.32.0`. To build with a different supported version, set the `K8S_VERSION` environment variable **before** building the Docker image:
+
+```bash
+K8S_VERSION=v1.31.0 ./tools/builder/build.sh
+```
+
+Supported versions: `v1.30.0`, `v1.31.0`, `v1.32.0` (latest three minor releases).
+
+### `build-k8s-matrix.sh`
+
+**Usage**: `./tools/builder/build-k8s-matrix.sh [variant] [version]`
+
+Builds a KeelOS image variant for every supported Kubernetes version. This is
+used by CI to validate multi-version compatibility and by release pipelines to
+produce per-version artifacts.
+
+```bash
+# Build cloud images for all supported K8s versions
+./tools/builder/build-k8s-matrix.sh cloud v1.0.0
+
+# Override the version list
+K8S_VERSIONS="v1.31.0 v1.32.0" ./tools/builder/build-k8s-matrix.sh edge v1.0.0
+```

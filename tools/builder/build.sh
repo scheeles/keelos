@@ -11,7 +11,7 @@ IMAGE_NAME="keelos-builder"
 HOST_ARCH=$(uname -m)
 echo "=== Detected host architecture: ${HOST_ARCH} ==="
 
-K8S_VERSION=${K8S_VERSION:-v1.29.0}
+K8S_VERSION=${K8S_VERSION:-v1.32.0}
 echo "=== Building Builder Image (K8S_VERSION=${K8S_VERSION}) ==="
 
 # Build with platform detection
