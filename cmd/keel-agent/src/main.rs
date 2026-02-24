@@ -35,6 +35,7 @@ use tokio_stream::Stream;
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
+mod audit;
 mod cert_metrics;
 mod cert_renewal;
 mod diagnostics;
@@ -1197,9 +1198,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_rollback_supervisor(rb_health, rb_scheduler).await;
     });
 
+    // Initialize audit logging
+    let audit_log = audit::AuditLog::new("/var/lib/keel/audit/audit.log");
+    let audit_layer = audit::AuditLayer::new(audit_log);
+    info!("Audit logging enabled");
+
     // Start gRPC server
     info!(addr = %grpc_addr, "Starting gRPC server");
     let grpc_server = builder
+        .layer(audit_layer)
         .add_service(NodeServiceServer::new(node_service))
         .serve(grpc_addr);
 

@@ -1471,6 +1471,7 @@ dependencies = [
  "chrono",
  "futures",
  "hostname",
+ "http",
  "k8s-openapi",
  "keel-api",
  "keel-config",

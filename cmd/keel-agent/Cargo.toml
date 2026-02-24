@@ -18,6 +18,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 tokio-cron-scheduler = "0.15"
 tonic = { version = "0.14", features = ["tls-webpki-roots"] }
+http = "1"
 prost = "0.14"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1"
