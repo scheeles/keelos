@@ -17,6 +17,9 @@ docker run --rm \
     keelos-builder \
     /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package keel-init && cargo build --release --target x86_64-unknown-linux-musl --package keel-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
 
+# Fix permissions after Docker build (files are created as root)
+sudo chown -R "$(id -u):$(id -g)" "${BUILD_DIR}" || true
+
 # 2. Prepare Dummy Update Image
 echo "Creating dummy update image..."
 echo "NEW_VERSION_IMAGE" > "${BUILD_DIR}/update.squashfs"

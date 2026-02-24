@@ -180,7 +180,7 @@ enum RollbackAction {
 enum InitMode {
     /// Initialize with self-signed bootstrap certificate (24h validity)
     Bootstrap {
-        /// Node endpoint (e.g., "192.168.1.10" or "localhost")
+        /// Node endpoint (e.g., "192.168.1.10", "localhost", or "localhost:50051")
         #[arg(long)]
         node: String,
     },
@@ -470,7 +470,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (cert_pem, key_pem) = keel_crypto::generate_bootstrap_certificate(24)?;
                 println!("✓ Generated bootstrap certificate");
 
-                let endpoint = format!("http://{}:50051", node);
+                let endpoint = if node.contains(':') {
+                    format!("http://{node}")
+                } else {
+                    format!("http://{node}:50051")
+                };
                 let mut client = NodeServiceClient::connect(endpoint.clone()).await?;
 
                 let request = tonic::Request::new(InitBootstrapRequest {
