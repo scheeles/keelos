@@ -1356,7 +1356,9 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
 mod tests {
     use super::*;
     use keel_api::node::node_service_server::NodeService;
-    use keel_api::node::{EnableDebugModeRequest, GetDebugStatusRequest, GetStatusRequest};
+    use keel_api::node::{
+        EnableDebugModeRequest, EnableRecoveryModeRequest, GetDebugStatusRequest, GetStatusRequest,
+    };
 
     fn make_test_service() -> HelperNodeService {
         HelperNodeService {
@@ -1422,5 +1424,143 @@ mod tests {
         assert!(inner.enabled);
         assert!(!inner.session_id.is_empty());
         assert!(inner.remaining_secs > 0);
+    }
+
+    #[tokio::test]
+    async fn test_enable_recovery_mode_via_grpc() {
+        let service = make_test_service();
+        let request = tonic::Request::new(EnableRecoveryModeRequest {
+            duration_secs: 600,
+            reason: "emergency repair".to_string(),
+        });
+        let response = service.enable_recovery_mode(request).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(inner.success);
+        assert!(inner.message.contains("emergency repair"));
+        assert!(!inner.expires_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_enable_recovery_mode_rejects_duplicate_via_grpc() {
+        let service = make_test_service();
+
+        let req1 = tonic::Request::new(EnableRecoveryModeRequest {
+            duration_secs: 600,
+            reason: "first".to_string(),
+        });
+        let resp1 = service.enable_recovery_mode(req1).await.unwrap();
+        assert!(resp1.into_inner().success);
+
+        let req2 = tonic::Request::new(EnableRecoveryModeRequest {
+            duration_secs: 600,
+            reason: "second".to_string(),
+        });
+        let resp2 = service.enable_recovery_mode(req2).await.unwrap();
+        assert!(!resp2.into_inner().success);
+    }
+
+    #[test]
+    fn test_parse_log_line_basic() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: test message", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.component, "kernel");
+        assert_eq!(entry.message, "test message");
+    }
+
+    #[test]
+    fn test_parse_log_line_error_level() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.err: something failed", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "error");
+    }
+
+    #[test]
+    fn test_parse_log_line_warn_level() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.warn: low memory", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "warn");
+    }
+
+    #[test]
+    fn test_parse_log_line_debug_level() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.debug: verbose info", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "debug");
+    }
+
+    #[test]
+    fn test_parse_log_line_crit_maps_to_error() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.crit: critical", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().level, "error");
+    }
+
+    #[test]
+    fn test_parse_log_line_warning_maps_to_warn() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.warning: warning msg", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().level, "warn");
+    }
+
+    #[test]
+    fn test_parse_log_line_notice_maps_to_info() {
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.notice: notice msg", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().level, "info");
+    }
+
+    #[test]
+    fn test_parse_log_line_filter_by_level() {
+        // Should match
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.err: bad stuff", "error", "");
+        assert!(entry.is_some());
+
+        // Should NOT match (line is info level, filter is error)
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: normal stuff", "error", "");
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_parse_log_line_filter_by_component() {
+        // Component is always "kernel" for dmesg, so "kernel" should match
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: message", "", "kernel");
+        assert!(entry.is_some());
+
+        // Filtering for a different component should return None
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: message", "", "kubelet");
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_parse_log_line_no_facility() {
+        // Line without facility.level prefix
+        let entry = parse_log_line("2024-01-01T00:00:00 plain message without colon", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.message, "plain message without colon");
+    }
+
+    #[test]
+    fn test_parse_log_line_empty() {
+        // Single word with no spaces
+        let entry = parse_log_line("singleword", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.message, "singleword");
+    }
+
+    #[test]
+    fn test_parse_log_line_preserves_timestamp() {
+        let entry = parse_log_line("2024-06-15T12:30:45 kern.info: msg", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().timestamp, "2024-06-15T12:30:45");
     }
 }

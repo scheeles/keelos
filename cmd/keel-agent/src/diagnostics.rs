@@ -159,7 +159,23 @@ pub fn collect_crash_dump(
     include_kernel: bool,
     include_userspace: bool,
 ) -> Result<(String, u64), String> {
-    let dump_dir = "/var/lib/keel/crash-dumps";
+    collect_crash_dump_to(
+        "/var/lib/keel/crash-dumps",
+        include_kernel,
+        include_userspace,
+    )
+}
+
+/// Internal implementation of crash dump collection with configurable output directory.
+///
+/// # Errors
+///
+/// Returns an error string if dump collection fails.
+fn collect_crash_dump_to(
+    dump_dir: &str,
+    include_kernel: bool,
+    include_userspace: bool,
+) -> Result<(String, u64), String> {
     std::fs::create_dir_all(dump_dir)
         .map_err(|e| format!("Failed to create crash dump directory: {e}"))?;
 
@@ -231,7 +247,25 @@ pub fn create_system_snapshot(
     include_config: bool,
     include_logs: bool,
 ) -> Result<(String, String, u64), String> {
-    let snapshot_dir = "/var/lib/keel/snapshots";
+    create_system_snapshot_to(
+        "/var/lib/keel/snapshots",
+        label,
+        include_config,
+        include_logs,
+    )
+}
+
+/// Internal implementation of system snapshot creation with configurable output directory.
+///
+/// # Errors
+///
+/// Returns an error string if snapshot creation fails.
+fn create_system_snapshot_to(
+    snapshot_dir: &str,
+    label: &str,
+    include_config: bool,
+    include_logs: bool,
+) -> Result<(String, String, u64), String> {
     std::fs::create_dir_all(snapshot_dir)
         .map_err(|e| format!("Failed to create snapshot directory: {e}"))?;
 
@@ -406,5 +440,122 @@ mod tests {
         let _ = mgr.enable_recovery_mode(300, "first").await;
         let result = mgr.enable_recovery_mode(300, "second").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_collect_crash_dump_creates_file() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("keel-test-crash-{}", uuid::Uuid::new_v4()));
+        let dump_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-crash");
+
+        let result = collect_crash_dump_to(dump_dir, false, false);
+        assert!(result.is_ok());
+
+        let (path, size) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert!(path.starts_with(dump_dir));
+        assert!(path.contains("crash-"));
+        assert!(size > 0);
+
+        // Verify file exists and contains the header
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read dump: {e}"));
+        assert!(content.contains("=== KeelOS Crash Dump"));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_collect_crash_dump_with_kernel() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("keel-test-crash-k-{}", uuid::Uuid::new_v4()));
+        let dump_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-crash-k");
+
+        let result = collect_crash_dump_to(dump_dir, true, false);
+        assert!(result.is_ok());
+
+        let (path, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read dump: {e}"));
+        assert!(content.contains("--- Kernel Messages (dmesg) ---"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_collect_crash_dump_with_userspace() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("keel-test-crash-u-{}", uuid::Uuid::new_v4()));
+        let dump_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-crash-u");
+
+        let result = collect_crash_dump_to(dump_dir, false, true);
+        assert!(result.is_ok());
+
+        let (path, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        let content =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read dump: {e}"));
+        assert!(content.contains("--- Process List ---"));
+        assert!(content.contains("--- Memory Info ---"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_create_system_snapshot_creates_file() {
+        let tmp_dir = std::env::temp_dir().join(format!("keel-test-snap-{}", uuid::Uuid::new_v4()));
+        let snap_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-snap");
+
+        let result = create_system_snapshot_to(snap_dir, "test-label", false, false);
+        assert!(result.is_ok());
+
+        let (snapshot_id, path, size) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        assert!(!snapshot_id.is_empty());
+        assert!(path.starts_with(snap_dir));
+        assert!(path.contains("snapshot-"));
+        assert!(size > 0);
+
+        // Verify file exists and contains expected content
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read snapshot: {e}"));
+        assert!(content.contains("=== KeelOS System Snapshot ==="));
+        assert!(content.contains(&snapshot_id));
+        assert!(content.contains("test-label"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_create_system_snapshot_with_config() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("keel-test-snap-c-{}", uuid::Uuid::new_v4()));
+        let snap_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-snap-c");
+
+        let result = create_system_snapshot_to(snap_dir, "config-snap", true, false);
+        assert!(result.is_ok());
+
+        let (_, path, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read snapshot: {e}"));
+        assert!(content.contains("--- System Configuration ---"));
+        assert!(content.contains("Hostname:"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_create_system_snapshot_with_logs() {
+        let tmp_dir =
+            std::env::temp_dir().join(format!("keel-test-snap-l-{}", uuid::Uuid::new_v4()));
+        let snap_dir = tmp_dir.to_str().unwrap_or("/tmp/keel-test-snap-l");
+
+        let result = create_system_snapshot_to(snap_dir, "log-snap", false, true);
+        assert!(result.is_ok());
+
+        let (_, path, _) = result.unwrap_or_else(|e| panic!("unexpected error: {e}"));
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read snapshot: {e}"));
+        assert!(content.contains("--- Recent Kernel Logs ---"));
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
     }
 }
