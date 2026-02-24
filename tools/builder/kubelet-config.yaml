@@ -1,3 +1,6 @@
+# Compatible with Kubernetes v1.30 - v1.32 (kubelet.config.k8s.io/v1beta1 is
+# stable across these versions). Review for API deprecations when adding new
+# Kubernetes minor versions to the supported matrix.
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 cgroupDriver: cgroupfs

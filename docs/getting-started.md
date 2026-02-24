@@ -26,6 +26,31 @@ Continue reading below to build KeelOS from source.
 *   **QEMU**: Required for local testing (`qemu-system-x86_64`).
 *   A host machine with at least 4GB RAM and 10GB free disk space.
 
+## Supported Kubernetes Versions
+
+KeelOS supports the latest three Kubernetes minor releases. The currently supported versions are:
+
+| Version | Status  |
+|---------|---------|
+| v1.32.0 | Default |
+| v1.31.0 | Supported |
+| v1.30.0 | Supported |
+
+The default Kubernetes version is **v1.32.0**. To build with a different version, set the `K8S_VERSION` environment variable before entering the build environment:
+
+```bash
+# Build with Kubernetes v1.31.0
+K8S_VERSION=v1.31.0 ./tools/builder/build.sh
+```
+
+To build images for all supported versions at once, use the matrix builder inside the build container:
+
+```bash
+./tools/builder/build-k8s-matrix.sh cloud v1.0.0
+```
+
+CI validates every PR against all supported Kubernetes versions. Release artifacts are published per Kubernetes version.
+
 ## Step 1: Clone the Repository
 
 ```bash
