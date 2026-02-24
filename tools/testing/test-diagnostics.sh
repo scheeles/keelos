@@ -360,6 +360,60 @@ else
 fi
 
 # =============================================================================
+# TEST 7: Analyze Crash Dump
+# =============================================================================
+echo ""
+echo -e "${YELLOW}========================================${NC}"
+echo -e "${YELLOW}TEST 7: Analyze Crash Dump${NC}"
+echo -e "${YELLOW}========================================${NC}"
+
+if start_qemu "TEST7"; then
+    echo "[TEST7] Collecting crash dump to get a path for analysis..."
+    collect_output=$(run_osctl_capture diag crash-dump)
+    collect_exit=$?
+
+    if [ $collect_exit -eq 0 ] && echo "$collect_output" | grep -q "Path:"; then
+        # Extract the dump path from the collection output
+        dump_path=$(echo "$collect_output" | grep "Path:" | awk '{print $2}')
+        echo "[TEST7] Dump collected at: ${dump_path}"
+
+        echo "[TEST7] Analyzing crash dump..."
+        analyze_output=$(run_osctl_capture diag analyze-dump --path "$dump_path")
+        analyze_exit=$?
+
+        if [ $analyze_exit -eq 0 ] && echo "$analyze_output" | grep -q "Severity:"; then
+            echo -e "${GREEN}[TEST7] ✓ Crash dump analyzed successfully${NC}"
+            echo "$analyze_output"
+
+            # Verify the analysis includes a summary
+            if echo "$analyze_output" | grep -q "Summary:"; then
+                echo -e "${GREEN}[TEST7] ✓ Analysis output contains a summary${NC}"
+                echo -e "${GREEN}TEST 7: PASS${NC}"
+                ((TESTS_PASSED++))
+            else
+                echo -e "${RED}[TEST7] ✗ Analysis output missing Summary field${NC}"
+                echo -e "${RED}TEST 7: FAIL${NC}"
+                ((TESTS_FAILED++))
+            fi
+        else
+            echo -e "${RED}[TEST7] ✗ Failed to analyze crash dump${NC}"
+            echo "$analyze_output"
+            echo -e "${RED}TEST 7: FAIL${NC}"
+            ((TESTS_FAILED++))
+        fi
+    else
+        echo -e "${RED}[TEST7] ✗ Failed to collect crash dump for analysis${NC}"
+        echo "$collect_output"
+        echo -e "${RED}TEST 7: FAIL${NC}"
+        ((TESTS_FAILED++))
+    fi
+    stop_qemu "TEST7"
+else
+    echo -e "${RED}TEST 7: FAIL (boot failed)${NC}"
+    ((TESTS_FAILED++))
+fi
+
+# =============================================================================
 # SUMMARY
 # =============================================================================
 echo ""
