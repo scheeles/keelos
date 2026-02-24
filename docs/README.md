@@ -55,6 +55,7 @@ Step-by-step guides for specific tasks.
 | Document | Description |
 |----------|-------------|
 | [Kubernetes Bootstrap](./guides/kubernetes-bootstrap.md) | Join a KeelOS node to a Kubernetes cluster (token & kubeconfig methods). |
+| [Diagnostics & Debugging](./guides/diagnostics.md) | Debug mode, crash dumps, log streaming, snapshots, and recovery mode. |
 
 ## Learn More
 
@@ -76,6 +77,7 @@ Technical reference for APIs, CLI, and configuration schemas.
 | [osctl CLI Reference](./reference/osctl.md) | Complete command reference with flags and examples. |
 | [gRPC API Reference](./reference/api.md) | `NodeService` RPC methods and message types. |
 | [Network API Reference](./reference/network-api.md) | Network management RPC methods and configuration format. |
+| [Diagnostics API Reference](./reference/diagnostics-api.md) | Debug mode, crash dumps, log streaming, snapshots, and recovery RPCs. |
 | [Health & Rollback API](./api/health-and-rollback.md) | Health check and rollback API with examples in Python and Go. |
 | [Update Scheduling API](./api/update-scheduling.md) | Schedule, list, and cancel updates via the API. |
 | [Configuration Schema](./reference/configuration.md) | Data structures for update schedules, health checks, and rollback events. |

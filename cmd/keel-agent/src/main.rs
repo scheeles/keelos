@@ -25,7 +25,8 @@ use keel_agent::mtls::TlsManager;
 use keel_agent::telemetry;
 use keel_agent::update_scheduler;
 use keel_agent::{
-    HealthChecker, HealthCheckerConfig, HelperNodeService, ScheduleStatus, UpdateScheduler,
+    DiagnosticsManager, HealthChecker, HealthCheckerConfig, HelperNodeService, ScheduleStatus,
+    UpdateScheduler,
 };
 
 /// Initialize operational certificates if running in Kubernetes
@@ -115,6 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let health_config = HealthCheckerConfig::default();
     let health_checker = Arc::new(HealthChecker::new(health_config));
 
+    // Initialize diagnostics manager
+    let diagnostics = Arc::new(DiagnosticsManager::new());
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
     tokio::spawn(async move {
@@ -124,6 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let node_service = HelperNodeService {
         scheduler: scheduler.clone(),
         health_checker: health_checker.clone(),
+        diagnostics,
     };
 
     info!(grpc_addr = %grpc_addr, "Matic Agent starting");
@@ -431,21 +436,223 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
 mod tests {
     use super::*;
     use keel_api::node::node_service_server::NodeService;
-    use keel_api::node::GetStatusRequest;
+    use keel_api::node::{
+        EnableDebugModeRequest, EnableRecoveryModeRequest, GetDebugStatusRequest, GetStatusRequest,
+    };
+
+    fn make_test_service() -> HelperNodeService {
+        HelperNodeService {
+            scheduler: Arc::new(UpdateScheduler::new("/tmp/test-schedules.json")),
+            health_checker: Arc::new(HealthChecker::new(HealthCheckerConfig::default())),
+            diagnostics: Arc::new(DiagnosticsManager::new()),
+        }
+    }
 
     #[tokio::test]
     async fn test_get_status() {
-        let scheduler = Arc::new(UpdateScheduler::new("/tmp/test-schedules.json"));
-        let health_checker = Arc::new(HealthChecker::new(HealthCheckerConfig::default()));
-        let service = HelperNodeService {
-            scheduler,
-            health_checker,
-        };
+        let service = make_test_service();
         let request = tonic::Request::new(GetStatusRequest {});
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
 
         assert_eq!(inner.hostname, "keel-node");
         assert_eq!(inner.os_version, "0.1.0");
+    }
+
+    #[tokio::test]
+    async fn test_enable_debug_mode_via_grpc() {
+        let service = make_test_service();
+        let request = tonic::Request::new(EnableDebugModeRequest {
+            duration_secs: 300,
+            reason: "testing diagnostics".to_string(),
+        });
+        let response = service.enable_debug_mode(request).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(inner.success);
+        assert!(!inner.session_id.is_empty());
+        assert!(!inner.expires_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_debug_status_inactive() {
+        let service = make_test_service();
+        let request = tonic::Request::new(GetDebugStatusRequest {});
+        let response = service.get_debug_status(request).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(!inner.enabled);
+        assert!(inner.session_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_debug_status_after_enable() {
+        let service = make_test_service();
+
+        // Enable debug mode
+        let enable_req = tonic::Request::new(EnableDebugModeRequest {
+            duration_secs: 300,
+            reason: "test".to_string(),
+        });
+        let _ = service.enable_debug_mode(enable_req).await.unwrap();
+
+        // Check status
+        let status_req = tonic::Request::new(GetDebugStatusRequest {});
+        let response = service.get_debug_status(status_req).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(inner.enabled);
+        assert!(!inner.session_id.is_empty());
+        assert!(inner.remaining_secs > 0);
+    }
+
+    #[tokio::test]
+    async fn test_enable_recovery_mode_via_grpc() {
+        let service = make_test_service();
+        let request = tonic::Request::new(EnableRecoveryModeRequest {
+            duration_secs: 600,
+            reason: "emergency repair".to_string(),
+        });
+        let response = service.enable_recovery_mode(request).await.unwrap();
+        let inner = response.into_inner();
+
+        assert!(inner.success);
+        assert!(inner.message.contains("emergency repair"));
+        assert!(!inner.expires_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_enable_recovery_mode_rejects_duplicate_via_grpc() {
+        let service = make_test_service();
+
+        let req1 = tonic::Request::new(EnableRecoveryModeRequest {
+            duration_secs: 600,
+            reason: "first".to_string(),
+        });
+        let resp1 = service.enable_recovery_mode(req1).await.unwrap();
+        assert!(resp1.into_inner().success);
+
+        let req2 = tonic::Request::new(EnableRecoveryModeRequest {
+            duration_secs: 600,
+            reason: "second".to_string(),
+        });
+        let resp2 = service.enable_recovery_mode(req2).await.unwrap();
+        assert!(!resp2.into_inner().success);
+    }
+
+    #[test]
+    fn test_parse_log_line_basic() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: test message", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.component, "kernel");
+        assert_eq!(entry.message, "test message");
+    }
+
+    #[test]
+    fn test_parse_log_line_error_level() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.err: something failed", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "error");
+    }
+
+    #[test]
+    fn test_parse_log_line_warn_level() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.warn: low memory", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "warn");
+    }
+
+    #[test]
+    fn test_parse_log_line_debug_level() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.debug: verbose info", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "debug");
+    }
+
+    #[test]
+    fn test_parse_log_line_crit_maps_to_error() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.crit: critical", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().level, "error");
+    }
+
+    #[test]
+    fn test_parse_log_line_warning_maps_to_warn() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.warning: warning msg", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().level, "warn");
+    }
+
+    #[test]
+    fn test_parse_log_line_notice_maps_to_info() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.notice: notice msg", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().level, "info");
+    }
+
+    #[test]
+    fn test_parse_log_line_filter_by_level() {
+        use keel_agent::parse_log_line;
+        // Should match
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.err: bad stuff", "error", "");
+        assert!(entry.is_some());
+
+        // Should NOT match (line is info level, filter is error)
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: normal stuff", "error", "");
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_parse_log_line_filter_by_component() {
+        use keel_agent::parse_log_line;
+        // Component is always "kernel" for dmesg, so "kernel" should match
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: message", "", "kernel");
+        assert!(entry.is_some());
+
+        // Filtering for a different component should return None
+        let entry = parse_log_line("2024-01-01T00:00:00 kern.info: message", "", "kubelet");
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_parse_log_line_no_facility() {
+        use keel_agent::parse_log_line;
+        // Line without facility.level prefix
+        let entry = parse_log_line("2024-01-01T00:00:00 plain message without colon", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.message, "plain message without colon");
+    }
+
+    #[test]
+    fn test_parse_log_line_empty() {
+        use keel_agent::parse_log_line;
+        // Single word with no spaces
+        let entry = parse_log_line("singleword", "", "");
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.level, "info");
+        assert_eq!(entry.message, "singleword");
+    }
+
+    #[test]
+    fn test_parse_log_line_preserves_timestamp() {
+        use keel_agent::parse_log_line;
+        let entry = parse_log_line("2024-06-15T12:30:45 kern.info: msg", "", "");
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().timestamp, "2024-06-15T12:30:45");
     }
 }

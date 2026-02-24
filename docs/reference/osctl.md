@@ -125,3 +125,62 @@ osctl network config show
 # Set DNS servers
 osctl network dns set --nameserver 8.8.8.8 --nameserver 1.1.1.1
 ```
+
+### `diag`
+Diagnostics and debugging commands. All sessions are time-limited (max 1 hour) and audit-logged.
+
+```bash
+# Enable time-limited debug mode
+osctl diag debug [--duration <secs>] [--reason "why"]
+
+# Check debug mode status
+osctl diag debug-status
+
+# Collect crash dump (kernel + userspace)
+osctl diag crash-dump [--kernel true] [--userspace true]
+
+# Stream logs with filters
+osctl diag logs [--level <level>] [--component <name>] [--tail <n>]
+
+# Create system snapshot
+osctl diag snapshot [--label <text>] [--config true] [--logs true]
+
+# Enable emergency recovery mode
+osctl diag recovery [--duration <secs>] [--reason "why"]
+```
+
+#### `diag debug`
+Enables a time-limited debug session with enhanced logging.
+*   `--duration`: Session length in seconds (default: 900, max: 3600).
+*   `--reason`: Audit log reason (default: `"Manual debug via osctl"`).
+
+#### `diag debug-status`
+Shows whether debug mode is currently active, including session ID, reason, and remaining time.
+
+#### `diag crash-dump`
+Collects kernel messages (dmesg) and userspace process information.
+*   `--kernel`: Include kernel crash data (default: `true`).
+*   `--userspace`: Include userspace process info (default: `true`).
+
+Dumps are saved to `/var/lib/keel/crash-dumps/` on the target node.
+
+#### `diag logs`
+Streams system logs with optional filtering.
+*   `--level`: Filter by level (`debug`, `info`, `warn`, `error`).
+*   `--component`: Filter by component name (e.g., `kernel`).
+*   `--tail`: Number of historical lines to include (default: 50).
+
+#### `diag snapshot`
+Creates a point-in-time system state capture.
+*   `--label`: Human-readable label (default: `"manual snapshot"`).
+*   `--config`: Include system configuration (default: `true`).
+*   `--logs`: Include recent kernel logs (default: `true`).
+
+Snapshots are saved to `/var/lib/keel/snapshots/` on the target node.
+
+#### `diag recovery`
+Enables time-limited emergency recovery mode.
+*   `--duration`: Recovery window in seconds (default: 900, max: 3600).
+*   `--reason`: Audit log reason (default: `"Manual recovery via osctl"`).
+
+For detailed usage and troubleshooting workflows, see the [Diagnostics Guide](../guides/diagnostics.md).

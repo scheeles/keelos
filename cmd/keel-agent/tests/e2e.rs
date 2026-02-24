@@ -28,9 +28,12 @@ async fn start_test_server() -> Result<SocketAddr, Box<dyn std::error::Error>> {
         keel_agent::HealthCheckerConfig::default(),
     ));
 
+    let diagnostics = std::sync::Arc::new(keel_agent::DiagnosticsManager::new());
+
     let service = keel_agent::HelperNodeService {
         scheduler,
         health_checker,
+        diagnostics,
     };
 
     tokio::spawn(async move {

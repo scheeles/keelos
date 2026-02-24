@@ -16,25 +16,123 @@ env:
 
 jobs:
   # ============================================================================
-  # Build OS Images (ISO, RAW, QCOW2)
+  # Determine version (shared by all jobs)
   # ============================================================================
-  build-os:
+  version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
-
       - name: Get version
         id: version
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
           else
-            # Extract version from tag (v0.1.0 -> 0.1.0)
             VERSION="${GITHUB_REF#refs/tags/v}"
             echo "version=${VERSION}" >> $GITHUB_OUTPUT
           fi
+
+  # ============================================================================
+  # Build OS Image Variants (cloud, bare-metal, edge, dev)
+  # Each variant runs in parallel via matrix strategy.
+  # ============================================================================
+  build-os:
+    needs: [version]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - name: cloud
+            description: "Cloud (AWS/GCP/Azure)"
+          - name: bare-metal
+            description: "Bare Metal (PXE/ISO)"
+          - name: edge
+            description: "Edge/IoT (Minimal)"
+          - name: dev
+            description: "Development (Debug)"
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v5
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-release-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-release-
+            ${{ runner.os }}-buildx-
+
+      - name: Cache Cargo Registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Kernel
+        uses: actions/cache@v5
+        with:
+          path: |
+            .cache/kernel
+            build/kernel
+          key: ${{ runner.os }}-kernel-${{ matrix.variant.name }}-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/variants/*.conf') }}
+
+      - name: Build Builder Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tools/builder
+          push: false
+          load: true
+          tags: keelos-builder:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Build ${{ matrix.variant.description }} Variant
+        run: |
+          mkdir -p target .cache/kernel build build/variants
+          docker run --rm \
+            -v ${{ github.workspace }}:/keelos \
+            -v ~/.cargo/registry:/root/.cargo/registry \
+            -v ~/.cargo/git:/root/.cargo/git \
+            --privileged \
+            keelos-builder:latest \
+            /keelos/tools/builder/build-variant.sh ${{ matrix.variant.name }} ${{ needs.version.outputs.version }}
+
+      - name: Fix Permissions
+        if: always()
+        run: |
+          sudo chown -R $USER:$USER target ~/.cargo .cache build || true
+
+      - name: Upload Variant Artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: keelos-${{ matrix.variant.name }}
+          path: build/variants/${{ matrix.variant.name }}/keelos-*
+          retention-days: 7
+
+  # ============================================================================
+  # Build base OS images (backwards-compatible, produces generic ISO/RAW/QCOW2)
+  # ============================================================================
+  build-os-base:
+    needs: [version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -100,7 +198,7 @@ jobs:
             -v ${{ github.workspace }}:/keelos \
             --privileged \
             keelos-builder:latest \
-            /keelos/tools/builder/build-images.sh ${{ steps.version.outputs.version }}
+            /keelos/tools/builder/build-images.sh ${{ needs.version.outputs.version }}
 
       - name: Fix Permissions
         if: always()
@@ -223,7 +321,7 @@ jobs:
   # Create Release & Upload All Artifacts
   # ============================================================================
   release:
-    needs: [build-os, build-osctl-linux-windows, build-osctl-macos]
+    needs: [build-os, build-os-base, build-osctl-linux-windows, build-osctl-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -237,10 +335,20 @@ jobs:
       - name: Prepare Release Files
         run: |
           mkdir -p release
-          
-          # OS Images
-          find artifacts -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" \) -not -path "*/osctl-*" -exec cp {} release/ \;
-          
+
+          # Base OS Images
+          find artifacts/keelos-iso artifacts/keelos-raw artifacts/keelos-qcow2 artifacts/keelos-pxe \
+            -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) \
+            -exec cp {} release/ \; 2>/dev/null || true
+
+          # Variant OS Images
+          for variant_dir in artifacts/keelos-cloud artifacts/keelos-bare-metal artifacts/keelos-edge artifacts/keelos-dev; do
+            if [ -d "$variant_dir" ]; then
+              find "$variant_dir" -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) \
+                -exec cp {} release/ \;
+            fi
+          done
+
           # osctl Binaries
           cd artifacts
           for dir in osctl-*/; do
@@ -256,7 +364,7 @@ jobs:
             cd ..
           done
           cd ..
-          
+
           echo "Release contents:"
           ls -la release/
 

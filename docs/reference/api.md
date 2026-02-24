@@ -58,3 +58,36 @@ Manually reverts to the previous partition.
 Returns a list of past rollback events.
 *   **Response**: `GetRollbackHistoryResponse`
     *   `events` (repeated `RollbackEvent`)
+
+### Diagnostics & Debugging
+
+For complete diagnostics API documentation, see [Diagnostics API Reference](./diagnostics-api.md).
+
+#### `EnableDebugMode`
+Activates a time-limited debug session.
+*   **Request**: `EnableDebugModeRequest` — `duration_secs`, `reason`
+*   **Response**: `EnableDebugModeResponse` — `success`, `session_id`, `expires_at`
+
+#### `GetDebugStatus`
+Returns current debug session status.
+*   **Response**: `GetDebugStatusResponse` — `enabled`, `session_id`, `remaining_secs`
+
+#### `CollectCrashDump`
+Collects kernel and userspace diagnostic data.
+*   **Request**: `CollectCrashDumpRequest` — `include_kernel`, `include_userspace`
+*   **Response**: `CollectCrashDumpResponse` — `dump_path`, `dump_size_bytes`
+
+#### `StreamLogs`
+Streams system logs with level and component filtering.
+*   **Request**: `StreamLogsRequest` — `level`, `component`, `tail_lines`
+*   **Response**: (Stream) `LogEntry` — `timestamp`, `level`, `component`, `message`
+
+#### `CreateSystemSnapshot`
+Creates a point-in-time system state capture.
+*   **Request**: `CreateSystemSnapshotRequest` — `label`, `include_config`, `include_logs`
+*   **Response**: `CreateSystemSnapshotResponse` — `snapshot_id`, `snapshot_path`, `size_bytes`
+
+#### `EnableRecoveryMode`
+Enables time-limited emergency recovery mode.
+*   **Request**: `EnableRecoveryModeRequest` — `reason`, `duration_secs`
+*   **Response**: `EnableRecoveryModeResponse` — `success`, `expires_at`
