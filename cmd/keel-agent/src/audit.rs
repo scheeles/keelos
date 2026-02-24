@@ -85,10 +85,18 @@ impl AuditLog {
             let mut guard = self.writer.lock().await;
             if let Some(ref mut file) = *guard {
                 let write_result = writeln!(file, "{line}");
-                if let Err(e) = write_result {
-                    warn!(error = %e, path = %self.path.display(), "Failed to write audit entry");
-                    // Try to reopen the file on next write
-                    *guard = Self::open_file(&self.path);
+                match write_result {
+                    Ok(()) => {
+                        // Flush to ensure audit entries are durably written
+                        if let Err(e) = file.flush() {
+                            warn!(error = %e, path = %self.path.display(), "Failed to flush audit entry");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, path = %self.path.display(), "Failed to write audit entry");
+                        // Try to reopen the file on next write
+                        *guard = Self::open_file(&self.path);
+                    }
                 }
             }
         }
@@ -151,7 +159,10 @@ where
         let start = std::time::Instant::now();
         let audit_log = self.audit_log.clone();
 
-        // Follows tower best-practice: clone the ready service.
+        // Clone the service that was polled ready, then swap it back into `self`
+        // so that `self.inner` is the un-polled clone. This ensures we always
+        // call a service instance that has been through `poll_ready`, which is
+        // required by the Tower Service contract.
         let mut inner = self.inner.clone();
         std::mem::swap(&mut self.inner, &mut inner);
 
