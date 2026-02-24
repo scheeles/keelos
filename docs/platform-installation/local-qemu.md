@@ -59,7 +59,7 @@ To access services inside the VM, we forward ports to localhost.
 Because of this forwarding, you must target port `50052` when running `osctl` on your host:
 
 ```bash
-osctl --addr 127.0.0.1:50052 status
+osctl --endpoint http://127.0.0.1:50052 status
 ```
 
 ## Storage

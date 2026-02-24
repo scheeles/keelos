@@ -13,16 +13,19 @@ The Linux kernel initializes hardware, mounts the `initramfs`, and executes the 
 ### 3. keel-init (PID 1)
 `keel-init` is the heart of the boot process. It is a statically linked Rust binary that performs the following steps sequentially:
 
-1.  **Mount API Filesystems**: Mounts `/proc`, `/sys`, `/dev`, and `/run`.
-2.  **Load Kernel Modules**: Loads necessary drivers for networking and storage.
-3.  **Network Setup**: Brings up the loopback interface (`lo`) and attempts DHCP on the primary interface (`eth0`).
-4.  **Partition Discovery**: Looks for the persistent data partition on the attached disk.
-    *   *If found*: Mounts it to `/var/lib/keel`.
-    *   *If not found*: Formats the disk and creates the partition structure (First Boot).
-5.  **Service Startup**:
-    *   Starts `containerd` to manage container lifecycles.
-    *   Starts `keel-agent` to listen for API commands.
-    *   Starts `kubelet` to join the Kubernetes cluster.
+1.  **Mount API Filesystems**: Mounts `/proc`, `/sys`, `/dev`, `/tmp`, and `/run`.
+2.  **Mount Persistent Storage**: Detects a data disk (e.g., `/dev/sda4`), formats it with ext4 if needed, mounts it at `/data`, and bind-mounts subdirectories:
+    - `/data/containerd` → `/var/lib/containerd`
+    - `/data/kubelet` → `/var/lib/kubelet`
+    - `/data/keel` → `/var/lib/keel`
+3.  **Setup Cgroup v2**: Mounts the cgroup2 filesystem and enables controllers (`cpu`, `memory`, `io`, `pids`, `cpuset`) required by kubelet and container runtimes.
+4.  **Set Hostname**: Reads a saved hostname from `/var/lib/keel/hostname` or generates a unique one (e.g., `keelos-<id>`).
+5.  **Network Setup**: Brings up the loopback interface (`lo`) and applies saved network configuration or falls back to DHCP.
+6.  **Service Startup**:
+    - Starts `keel-agent` to listen for API commands.
+    - Starts `containerd` to manage container lifecycles.
+    - Imports pre-loaded container images (e.g., the pause image).
+    - Starts `kubelet` — in standalone mode, bootstrap mode, or cluster mode depending on available kubeconfig files.
 
 ## Node Identity
 

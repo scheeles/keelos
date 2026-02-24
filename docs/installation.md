@@ -138,7 +138,7 @@ After booting KeelOS:
 3. Use `osctl` to manage the node remotely
 
 ```bash
-osctl --addr <NODE_IP>:50051 status
+osctl --endpoint http://<NODE_IP>:50051 status
 ```
 
 See [Using osctl](./using-osctl.md) for complete CLI reference.
