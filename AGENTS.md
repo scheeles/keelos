@@ -44,7 +44,12 @@ Use KeelOS-specific terms consistently:
 1. **No Panics in PID 1**: The `keel-init` binary is PID 1 and **must never panic**. Always use `Result<T, E>` with proper error handling.
 2. **Memory Safety**: All system components (PID 1, Agent) are written in **Rust**. Tooling may use Go.
 3. **Minimal Dependencies**: Audit every crate. Prefer `std` where possible.
-4. **Static Linking**: All OS image binaries target `x86_64-unknown-linux-musl`. `osctl` additionally ships `aarch64-unknown-linux-musl`, `armv7-unknown-linux-musleabihf`, and `x86_64-pc-windows-gnu` builds via `cross`.
+4. **Static Linking**: All OS image binaries target `x86_64-unknown-linux-musl`. `osctl` additionally ships the following targets via `cross`:
+   - `aarch64-unknown-linux-musl` — Linux ARM64
+   - `armv7-unknown-linux-musleabihf` — Linux ARMv7
+   - `x86_64-pc-windows-gnu` — Windows x86_64
+   - `x86_64-apple-darwin` — macOS Intel
+   - `aarch64-apple-darwin` — macOS Apple Silicon
 5. **Containerized Builds**: All builds must run inside a container for reproducibility:
    ```bash
    ./tools/builder/build.sh
