@@ -1065,16 +1065,19 @@ async fn execute_scheduled_update(
     Ok(())
 }
 
+/// Default grace period (in seconds) before running post-boot health checks
+const DEFAULT_HEALTH_CHECK_GRACE_SECS: u64 = 60;
+
 /// Rollback supervisor checks health after boot and triggers rollback if critical
 async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<UpdateScheduler>) {
     use tokio::time::{sleep, Duration};
 
-    // Use health check timeout from the latest schedule if available, otherwise default to 60s
+    // Use health check timeout from the latest schedule if available
     let grace_secs = scheduler
         .get_latest_active_schedule()
         .await
         .and_then(|s| s.health_check_timeout_secs)
-        .map_or(60, u64::from);
+        .map_or(DEFAULT_HEALTH_CHECK_GRACE_SECS, u64::from);
 
     info!(
         grace_secs = grace_secs,
