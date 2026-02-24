@@ -52,6 +52,7 @@ impl DiagnosticsManager {
         true
     }
 
+    #[allow(dead_code)]
     pub async fn is_debug_mode_enabled(&self) -> bool {
         let mut mode = self.debug_mode.write().await;
         if mode.enabled {
@@ -172,8 +173,8 @@ impl DiagnosticsManager {
                 if std::path::Path::new("/etc/keel").exists() { targets.push("/etc/keel"); }
                 if std::path::Path::new("/var/lib/keel").exists() { targets.push("/var/lib/keel"); }
             }
-            if include_logs {
-                if std::path::Path::new("/var/log/journal").exists() { targets.push("/var/log/journal"); }
+            if include_logs && std::path::Path::new("/var/log/journal").exists() {
+                targets.push("/var/log/journal");
             }
 
             if targets.is_empty() {
