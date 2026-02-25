@@ -7,6 +7,7 @@ edition = "2021"
 keel-api = { path = "../../pkg/api" }
 keel-crypto = { path = "../../pkg/crypto" }
 tonic = { version = "0.14", features = ["tls-webpki-roots"] }
+rustls = "0.23"
 prost = "0.14"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
 clap = { version = "4.4", features = ["derive"] }

@@ -296,6 +296,10 @@ async fn connect_with_auto_tls(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install the rustls crypto provider required for TLS/mTLS connections.
+    // Auto-detection from crate features can fail on musl static builds.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let cli = Cli::parse();
 
     // Auto-load certificates if available, fallback to HTTP
