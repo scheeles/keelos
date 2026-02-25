@@ -180,7 +180,7 @@ enum RollbackAction {
 enum InitMode {
     /// Initialize with self-signed bootstrap certificate (24h validity)
     Bootstrap {
-        /// Node endpoint (e.g., "192.168.1.10" or "localhost")
+        /// Node endpoint (e.g., "192.168.1.10", "localhost", or "localhost:50051")
         #[arg(long)]
         node: String,
     },
@@ -296,6 +296,10 @@ async fn connect_with_auto_tls(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install the rustls crypto provider required for TLS/mTLS connections.
+    // Auto-detection from crate features can fail on musl static builds.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let cli = Cli::parse();
 
     // Auto-load certificates if available, fallback to HTTP
@@ -470,7 +474,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (cert_pem, key_pem) = keel_crypto::generate_bootstrap_certificate(24)?;
                 println!("✓ Generated bootstrap certificate");
 
-                let endpoint = format!("http://{}:50051", node);
+                let endpoint = if node.contains(':') {
+                    format!("http://{node}")
+                } else {
+                    format!("http://{node}:50051")
+                };
                 let mut client = NodeServiceClient::connect(endpoint.clone()).await?;
 
                 let request = tonic::Request::new(InitBootstrapRequest {

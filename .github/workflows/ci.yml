@@ -453,6 +453,11 @@ jobs:
           chmod +x tools/testing/*.sh
           ./tools/testing/test-update-flow.sh
 
+      - name: Fix Permissions
+        if: always()
+        run: |
+          sudo chown -R $USER:$USER target build .cache || true
+
   test-audit:
     needs: [build]
     runs-on: ubuntu-latest
