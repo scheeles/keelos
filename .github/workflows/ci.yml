@@ -10,6 +10,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  K8S_DEFAULT_VERSION: v1.31.0
 
 jobs:
   # ============================================================================
@@ -55,9 +56,9 @@ jobs:
         run: cargo audit
 
   # ============================================================================
-  # BUILD - Produces artifacts for parallel test jobs
+  # BUILD - Produces artifacts for parallel test jobs (default K8s version)
   # ============================================================================
-  
+
   build:
     needs: [lint]
     runs-on: ubuntu-latest
@@ -106,6 +107,8 @@ jobs:
           push: false
           load: true
           tags: keelos-builder:latest
+          build-args: |
+            K8S_VERSION=${{ env.K8S_DEFAULT_VERSION }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -258,8 +261,7 @@ jobs:
 
       - name: Install kubectl
         run: |
-          K8S_VERSION=v1.31.0
-          wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504 -O kubectl https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubectl
+          wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504 -O kubectl https://dl.k8s.io/release/${{ env.K8S_DEFAULT_VERSION }}/bin/linux/amd64/kubectl
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/
 
@@ -477,3 +479,38 @@ jobs:
         run: |
           chmod +x tools/testing/*.sh
           ./tools/testing/test-audit.sh
+
+  # ============================================================================
+  # K8S VERSION COMPATIBILITY - Validates builder image across supported versions
+  # ============================================================================
+
+  build-k8s-compat:
+    needs: [lint]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s_version:
+          - v1.29.0
+          - v1.30.0
+          - v1.32.0
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Builder Image (K8s ${{ matrix.k8s_version }})
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tools/builder
+          push: false
+          load: true
+          tags: keelos-builder:k8s-${{ matrix.k8s_version }}
+          build-args: |
+            K8S_VERSION=${{ matrix.k8s_version }}
+
+      - name: Verify kubelet binary
+        run: |
+          docker run --rm keelos-builder:k8s-${{ matrix.k8s_version }} \
+            /usr/local/bin/kubelet --version

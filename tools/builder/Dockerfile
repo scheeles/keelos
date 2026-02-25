@@ -54,6 +54,7 @@ RUN export CONTAINERD_VERSION=1.7.11 && \
     rm /containerd-static-${CONTAINERD_VERSION}-linux-amd64.tar.gz
 
 # Install Kubernetes binaries (x86_64 target)
+# Supported versions: v1.29.x, v1.30.x, v1.31.x, v1.32.x
 ARG K8S_VERSION=v1.31.0
 RUN wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504 -O /usr/local/bin/kubelet https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/amd64/kubelet && \
     chmod +x /usr/local/bin/kubelet

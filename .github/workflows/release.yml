@@ -13,6 +13,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  K8S_DEFAULT_VERSION: v1.31.0
 
 jobs:
   # ============================================================================
@@ -52,6 +53,11 @@ jobs:
             description: "Edge/IoT (Minimal)"
           - name: dev
             description: "Development (Debug)"
+        k8s_version:
+          - v1.29.0
+          - v1.30.0
+          - v1.31.0
+          - v1.32.0
     steps:
       - uses: actions/checkout@v6
 
@@ -87,13 +93,15 @@ jobs:
             build/kernel
           key: ${{ runner.os }}-kernel-${{ matrix.variant.name }}-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/variants/*.conf') }}
 
-      - name: Build Builder Image
+      - name: Build Builder Image (K8s ${{ matrix.k8s_version }})
         uses: docker/build-push-action@v6
         with:
           context: ./tools/builder
           push: false
           load: true
           tags: keelos-builder:latest
+          build-args: |
+            K8S_VERSION=${{ matrix.k8s_version }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -102,7 +110,7 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      - name: Build ${{ matrix.variant.description }} Variant
+      - name: Build ${{ matrix.variant.description }} Variant (K8s ${{ matrix.k8s_version }})
         run: |
           mkdir -p target .cache/kernel build build/variants
           docker run --rm \
@@ -121,7 +129,7 @@ jobs:
       - name: Upload Variant Artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: keelos-${{ matrix.variant.name }}
+          name: keelos-${{ matrix.variant.name }}-k8s-${{ matrix.k8s_version }}
           path: build/variants/${{ matrix.variant.name }}/keelos-*
           retention-days: 7
 
@@ -131,6 +139,14 @@ jobs:
   build-os-base:
     needs: [version]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        k8s_version:
+          - v1.29.0
+          - v1.30.0
+          - v1.31.0
+          - v1.32.0
     steps:
       - uses: actions/checkout@v6
 
@@ -166,13 +182,15 @@ jobs:
             build/kernel
           key: ${{ runner.os }}-kernel-${{ hashFiles('tools/builder/kernel-build.sh', 'tools/builder/kernel-config') }}
 
-      - name: Build Builder Image
+      - name: Build Builder Image (K8s ${{ matrix.k8s_version }})
         uses: docker/build-push-action@v6
         with:
           context: ./tools/builder
           push: false
           load: true
           tags: keelos-builder:latest
+          build-args: |
+            K8S_VERSION=${{ matrix.k8s_version }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
@@ -208,28 +226,28 @@ jobs:
       - name: Upload ISO
         uses: actions/upload-artifact@v6
         with:
-          name: keelos-iso
+          name: keelos-iso-k8s-${{ matrix.k8s_version }}
           path: build/keelos-*.iso
           retention-days: 7
 
       - name: Upload RAW
         uses: actions/upload-artifact@v6
         with:
-          name: keelos-raw
+          name: keelos-raw-k8s-${{ matrix.k8s_version }}
           path: build/keelos-*.raw.gz
           retention-days: 7
 
       - name: Upload QCOW2
         uses: actions/upload-artifact@v6
         with:
-          name: keelos-qcow2
+          name: keelos-qcow2-k8s-${{ matrix.k8s_version }}
           path: build/keelos-*.qcow2
           retention-days: 7
 
       - name: Upload PXE Bundle
         uses: actions/upload-artifact@v6
         with:
-          name: keelos-pxe
+          name: keelos-pxe-k8s-${{ matrix.k8s_version }}
           path: build/keelos-*-pxe.tar.gz
           retention-days: 7
 
@@ -336,20 +354,34 @@ jobs:
         run: |
           mkdir -p release
 
-          # Base OS Images
-          find artifacts/keelos-iso artifacts/keelos-raw artifacts/keelos-qcow2 artifacts/keelos-pxe \
-            -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) \
-            -exec cp {} release/ \; 2>/dev/null || true
-
-          # Variant OS Images
-          for variant_dir in artifacts/keelos-cloud artifacts/keelos-bare-metal artifacts/keelos-edge artifacts/keelos-dev; do
-            if [ -d "$variant_dir" ]; then
-              find "$variant_dir" -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) \
-                -exec cp {} release/ \;
+          # Base OS Images (per K8s version)
+          for base_dir in artifacts/keelos-iso-k8s-* artifacts/keelos-raw-k8s-* artifacts/keelos-qcow2-k8s-* artifacts/keelos-pxe-k8s-*; do
+            if [ -d "$base_dir" ]; then
+              # Extract K8s version from directory name (e.g., keelos-iso-k8s-v1.31.0 -> v1.31.0)
+              k8s_ver=$(echo "$base_dir" | grep -oP 'k8s-v[\d.]+')
+              find "$base_dir" -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) | while read -r f; do
+                base=$(basename "$f")
+                name="${base%%.*}"
+                ext="${base#*.}"
+                cp "$f" "release/${name}-${k8s_ver}.${ext}"
+              done
             fi
           done
 
-          # osctl Binaries
+          # Variant OS Images (per K8s version)
+          for variant_dir in artifacts/keelos-*-k8s-v*; do
+            if [ -d "$variant_dir" ] && [[ "$variant_dir" != *iso* ]] && [[ "$variant_dir" != *raw* ]] && [[ "$variant_dir" != *qcow2* ]] && [[ "$variant_dir" != *pxe* ]]; then
+              k8s_ver=$(echo "$variant_dir" | grep -oP 'k8s-v[\d.]+')
+              find "$variant_dir" -type f \( -name "*.iso" -o -name "*.raw.gz" -o -name "*.qcow2" -o -name "*.tar.gz" -o -name "*.vhd" \) | while read -r f; do
+                base=$(basename "$f")
+                name="${base%%.*}"
+                ext="${base#*.}"
+                cp "$f" "release/${name}-${k8s_ver}.${ext}"
+              done
+            fi
+          done
+
+          # osctl Binaries (not K8s version-specific)
           cd artifacts
           for dir in osctl-*/; do
             name="${dir%/}"
