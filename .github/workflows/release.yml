@@ -119,7 +119,7 @@ jobs:
           sudo chown -R $USER:$USER target ~/.cargo .cache build || true
 
       - name: Upload Variant Artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keelos-${{ matrix.variant.name }}
           path: build/variants/${{ matrix.variant.name }}/keelos-*
@@ -206,28 +206,28 @@ jobs:
           sudo chown -R $USER:$USER target ~/.cargo .cache build || true
 
       - name: Upload ISO
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keelos-iso
           path: build/keelos-*.iso
           retention-days: 7
 
       - name: Upload RAW
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keelos-raw
           path: build/keelos-*.raw.gz
           retention-days: 7
 
       - name: Upload QCOW2
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keelos-qcow2
           path: build/keelos-*.qcow2
           retention-days: 7
 
       - name: Upload PXE Bundle
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: keelos-pxe
           path: build/keelos-*-pxe.tar.gz
@@ -275,7 +275,7 @@ jobs:
           cp target/${{ matrix.target }}/release/osctl${{ matrix.ext }} dist/${{ matrix.name }}/osctl${{ matrix.ext }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: osctl-${{ matrix.name }}
           path: dist/${{ matrix.name }}
@@ -312,7 +312,7 @@ jobs:
           cp target/${{ matrix.target }}/release/osctl dist/${{ matrix.name }}/osctl
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: osctl-${{ matrix.name }}
           path: dist/${{ matrix.name }}
@@ -328,7 +328,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
