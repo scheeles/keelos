@@ -100,7 +100,7 @@ jobs:
           key: ${{ runner.os }}-kernel-build-v2-${{ hashFiles('tools/builder/kernel-build.sh') }}
 
       - name: Build Builder Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./tools/builder
           push: false
@@ -364,7 +364,7 @@ jobs:
             ${{ runner.os }}-buildx-
 
       - name: Build Builder Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./tools/builder
           push: false
@@ -426,7 +426,7 @@ jobs:
           key: ${{ runner.os }}-kernel-build-v2-${{ hashFiles('tools/builder/kernel-build.sh') }}
 
       - name: Build Builder Image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./tools/builder
           push: false
