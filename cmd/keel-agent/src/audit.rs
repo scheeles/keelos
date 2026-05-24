@@ -34,6 +34,8 @@ pub struct AuditEntry {
 pub struct AuditLog {
     path: PathBuf,
     writer: Arc<Mutex<Option<std::fs::File>>>,
+    max_size_bytes: u64,
+    max_files: usize,
 }
 
 impl AuditLog {
@@ -48,6 +50,8 @@ impl AuditLog {
         Self {
             path,
             writer: Arc::new(Mutex::new(file)),
+            max_size_bytes: 10 * 1024 * 1024, // 10 MB default
+            max_files: 5,                     // 5 rotated files
         }
     }
 
@@ -83,6 +87,37 @@ impl AuditLog {
 
         if let Ok(line) = serde_json::to_string(entry) {
             let mut guard = self.writer.lock().await;
+
+            // Check size and rotate if needed
+            let mut needs_rotation = false;
+            if let Some(file) = &*guard {
+                if let Ok(metadata) = file.metadata() {
+                    // Line length roughly added to check threshold
+                    if metadata.len() + line.len() as u64 > self.max_size_bytes {
+                        needs_rotation = true;
+                    }
+                }
+            }
+
+            if needs_rotation {
+                // Close the current file
+                *guard = None;
+
+                // Rotate existing files: audit.log.4 -> audit.log.5, etc.
+                for i in (1..self.max_files).rev() {
+                    let old_path = format!("{}.{}", self.path.display(), i);
+                    let new_path = format!("{}.{}", self.path.display(), i + 1);
+                    let _ = std::fs::rename(&old_path, &new_path);
+                }
+
+                // Rename current file: audit.log -> audit.log.1
+                let first_rotated = format!("{}.1", self.path.display());
+                let _ = std::fs::rename(&self.path, &first_rotated);
+
+                // Open new file
+                *guard = Self::open_file(&self.path);
+            }
+
             if let Some(ref mut file) = *guard {
                 let write_result = writeln!(file, "{line}");
                 match write_result {

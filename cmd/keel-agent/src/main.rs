@@ -1,6 +1,6 @@
 //! KeelOS Agent - gRPC management server
 //!
-//! The Matic Agent provides a gRPC API for managing the node, including:
+//! The KeelOS Agent provides a gRPC API for managing the node, including:
 //! - Node status queries
 //! - Reboot scheduling
 //! - A/B partition updates
@@ -119,10 +119,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize diagnostics manager
     let diagnostics = Arc::new(DiagnosticsManager::new());
 
+    // Create global cancellation token for graceful shutdown
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
+    let executor_token = cancel_token.clone();
     tokio::spawn(async move {
-        schedule_executor(executor_scheduler).await;
+        schedule_executor(executor_scheduler, executor_token).await;
     });
 
     let node_service = HelperNodeService {
@@ -131,7 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         diagnostics,
     };
 
-    info!(grpc_addr = %grpc_addr, "Matic Agent starting");
+    info!(grpc_addr = %grpc_addr, "KeelOS Agent starting");
 
     // Initialize K8s operational certificates if running in cluster
     if let Some((cert_path, key_path)) = init_k8s_certificates().await {
@@ -153,9 +157,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let renewal_manager = Arc::new(CertRenewalManager::new(renewal_config));
+        let renewal_token = cancel_token.clone();
 
         tokio::spawn(async move {
-            renewal_manager.start_renewal_loop().await;
+            renewal_manager.start_renewal_loop(renewal_token).await;
         });
 
         info!("Certificate auto-renewal enabled (threshold: 30 days, check interval: 24 hours)");
@@ -203,15 +208,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("mTLS enabled successfully");
             }
             Err(e) => {
-                warn!("Failed to configure TLS: {}. Running without mTLS.", e);
+                // SECURITY: TLS configuration failure is fatal.
+                // Running without mTLS defeats the entire security model.
+                error!(
+                    "FATAL: Failed to configure TLS: {}. Refusing to start without mTLS.",
+                    e
+                );
+                return Err(format!(
+                    "TLS configuration failed: {}. \
+                     Set KEEL_ALLOW_INSECURE=1 to start without mTLS (DEVELOPMENT ONLY).",
+                    e
+                )
+                .into());
             }
         }
-    } else {
+    } else if std::env::var("KEEL_ALLOW_INSECURE").is_ok() {
         warn!(
-            "Server certificates not found at {}. Running without mTLS.",
+            "KEEL_ALLOW_INSECURE is set. Running WITHOUT mTLS. \
+             THIS IS INSECURE AND MUST NOT BE USED IN PRODUCTION."
+        );
+    } else {
+        error!(
+            "Server certificates not found at {}. Cannot start without mTLS.",
             server_cert_path
         );
-        info!("To enable mTLS, generate server certificate and key.");
+        return Err(format!(
+            "Server certificate not found at {}. \
+             Generate certificates or set KEEL_ALLOW_INSECURE=1 for development.",
+            server_cert_path
+        )
+        .into());
     }
 
     // Start health/metrics HTTP server
@@ -221,21 +247,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let health_router = health::create_health_router(health_state);
 
+    let health_token = cancel_token.clone();
     let health_server = tokio::spawn(async move {
         info!("Starting health/metrics HTTP server");
-        let listener = tokio::net::TcpListener::bind(health_addr)
+        let listener = match tokio::net::TcpListener::bind(health_addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(error = %e, "Failed to bind health server");
+                return;
+            }
+        };
+        if let Err(e) = axum::serve(listener, health_router)
+            .with_graceful_shutdown(async move { health_token.cancelled().await })
             .await
-            .expect("Failed to bind health server");
-        axum::serve(listener, health_router)
-            .await
-            .expect("Health server failed");
+        {
+            error!(error = %e, "Health server failed");
+        }
     });
 
     // Start rollback supervisor
     let rb_health = health_checker.clone();
     let rb_scheduler = scheduler.clone();
+    let rb_token = cancel_token.clone();
     tokio::spawn(async move {
-        start_rollback_supervisor(rb_health, rb_scheduler).await;
+        start_rollback_supervisor(rb_health, rb_scheduler, rb_token).await;
     });
 
     // Initialize audit logging
@@ -245,12 +280,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start gRPC server
     info!(addr = %grpc_addr, "Starting gRPC server");
+    let grpc_token = cancel_token.clone();
+
+    // Setup gRPC health reporter
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<NodeServiceServer<HelperNodeService>>()
+        .await;
+
     let grpc_server = builder
         .layer(audit_layer)
+        .add_service(health_service)
         .add_service(NodeServiceServer::new(node_service))
-        .serve(grpc_addr);
+        .serve_with_shutdown(grpc_addr, async move { grpc_token.cancelled().await });
 
-    // Run both servers concurrently
+    // Handle graceful shutdown signals
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
     tokio::select! {
         result = grpc_server => {
             if let Err(e) = result {
@@ -262,7 +308,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 warn!(error = %e, "Health server error");
             }
         }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received SIGINT, initiating graceful shutdown...");
+            cancel_token.cancel();
+        }
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM, initiating graceful shutdown...");
+            cancel_token.cancel();
+        }
     }
+
+    // Give background tasks a brief moment to wind down cleanly
+    info!("Waiting for background tasks to wind down...");
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     // Shutdown telemetry
     telemetry::shutdown_telemetry();
@@ -271,14 +329,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Background task executor for scheduled updates
-async fn schedule_executor(scheduler: Arc<UpdateScheduler>) {
+async fn schedule_executor(
+    scheduler: Arc<UpdateScheduler>,
+    cancel_token: tokio_util::sync::CancellationToken,
+) {
     use tokio::time::{sleep, Duration};
 
     info!("Background schedule executor started");
 
     loop {
         // Check for due schedules every 30 seconds
-        sleep(Duration::from_secs(30)).await;
+        tokio::select! {
+            _ = sleep(Duration::from_secs(30)) => {}
+            _ = cancel_token.cancelled() => {
+                info!("Schedule executor task shutting down gracefully");
+                break;
+            }
+        }
 
         let due_schedules = scheduler.get_due_schedules().await;
 
@@ -382,7 +449,11 @@ async fn execute_scheduled_update(
 const DEFAULT_HEALTH_CHECK_GRACE_SECS: u64 = 60;
 
 /// Rollback supervisor checks health after boot and triggers rollback if critical
-async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<UpdateScheduler>) {
+async fn start_rollback_supervisor(
+    health: Arc<HealthChecker>,
+    scheduler: Arc<UpdateScheduler>,
+    cancel_token: tokio_util::sync::CancellationToken,
+) {
     use tokio::time::{sleep, Duration};
 
     // Use health check timeout from the latest schedule if available
@@ -396,7 +467,13 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
         grace_secs = grace_secs,
         "Rollback supervisor started - waiting for system stability"
     );
-    sleep(Duration::from_secs(grace_secs)).await;
+    tokio::select! {
+        _ = sleep(Duration::from_secs(grace_secs)) => {}
+        _ = cancel_token.cancelled() => {
+            info!("Rollback supervisor task shutting down gracefully");
+            return;
+        }
+    }
 
     // Run critical check
     let (status, _) = health.run_all_checks().await;
@@ -447,6 +524,9 @@ mod tests {
     };
 
     fn make_test_service() -> HelperNodeService {
+        // Allow unauthenticated requests in unit tests (no TLS configured)
+        std::env::set_var("KEEL_ALLOW_INSECURE", "1");
+
         HelperNodeService {
             scheduler: Arc::new(UpdateScheduler::new("/tmp/test-schedules.json")),
             health_checker: Arc::new(HealthChecker::new(HealthCheckerConfig::default())),
@@ -461,7 +541,8 @@ mod tests {
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
 
-        assert_eq!(inner.hostname, "keel-node");
+        assert!(!inner.hostname.is_empty());
+        assert!(!inner.kernel_version.is_empty());
         assert_eq!(inner.os_version, "0.1.0");
     }
 

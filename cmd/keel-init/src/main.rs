@@ -22,6 +22,29 @@ use tracing_subscriber::FmtSubscriber;
 
 mod telemetry;
 
+// ---- System Paths ----
+// Binaries
+const CONTAINERD_PATH: &str = "/usr/bin/containerd";
+const KUBELET_PATH: &str = "/usr/bin/kubelet";
+const KUBELET_OVERRIDE_PATH: &str = "/var/lib/keel/bin/kubelet";
+const AGENT_PATH: &str = "/usr/bin/keel-agent";
+const CTR_PATH: &str = "/usr/bin/ctr";
+const IP_PATH: &str = "/sbin/ip";
+
+// Configuration
+const KUBELET_CONFIG_PATH: &str = "/etc/kubernetes/kubelet-config.yaml";
+const BOOTSTRAP_KUBECONFIG_PATH: &str = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
+const PERMANENT_KUBECONFIG_PATH: &str = "/var/lib/kubelet/kubeconfig";
+const BOOTSTRAP_CONFIG_PATH: &str = "/var/lib/keel/kubernetes/bootstrap.json";
+
+// Data directories
+const DATA_MOUNT: &str = "/data";
+const BOOT_METRICS_PATH: &str = "/run/keel/boot-metrics.json";
+const RESTART_SIGNAL_PATH: &str = "/run/keel/restart-kubelet";
+
+// Pre-loaded image directories
+const IMAGE_DIRS: [&str; 2] = ["/usr/share/keel/images", "/data/images"];
+
 /// Entry point - wraps run() to ensure PID 1 never exits unexpectedly
 fn main() {
     // Initialize tracing subscriber for structured logging
@@ -49,8 +72,9 @@ fn main() {
 
 /// Main init logic - all errors are propagated but never cause a panic
 fn run() -> Result<(), InitError> {
-    // Set safe umask
-    umask(Mode::from_bits(0o077).unwrap());
+    // Set safe umask - restrict default permissions for new files
+    // 0o077 is always a valid mode, but unwrap_or avoids any theoretical panic in PID 1
+    umask(Mode::from_bits(0o077).unwrap_or(Mode::empty()));
 
     // Set PATH - as PID 1, we have no inherited PATH from a parent process.
     // Child processes (kubelet, containerd, etc.) need this to find binaries like mount.
@@ -72,7 +96,7 @@ fn run() -> Result<(), InitError> {
 
     // Set up cgroups
     boot_tracker.start_phase("cgroups");
-    setup_cgroups();
+    setup_cgroups()?;
 
     // Set hostname
     setup_hostname();
@@ -90,7 +114,7 @@ fn run() -> Result<(), InitError> {
 
     // Export boot metrics
     boot_tracker.end_current_phase();
-    if let Err(e) = boot_tracker.export_to_file("/run/keel/boot-metrics.json") {
+    if let Err(e) = boot_tracker.export_to_file(BOOT_METRICS_PATH) {
         warn!(error = %e, "Failed to export boot metrics");
     }
 
@@ -149,25 +173,27 @@ fn setup_filesystems() -> Result<(), InitError> {
         debug!("Made / mount private");
     }
 
-    // Mount proc - critical for process management
+    // Mount proc - REQUIRED: critical for process management, /proc/uptime, etc.
     if let Err(e) =
         mount::<str, str, str, str>(Some("none"), "/proc", Some("proc"), MsFlags::empty(), None)
     {
-        warn!(error = %e, "Failed to mount /proc");
-    } else {
-        debug!("Mounted /proc");
+        return Err(InitError::Mount(format!(
+            "/proc mount failed (required for process management): {e}"
+        )));
     }
+    debug!("Mounted /proc");
 
-    // Mount sysfs
+    // Mount sysfs - REQUIRED: critical for device/cgroup management
     if let Err(e) =
         mount::<str, str, str, str>(Some("none"), "/sys", Some("sysfs"), MsFlags::empty(), None)
     {
-        warn!(error = %e, "Failed to mount /sys");
-    } else {
-        debug!("Mounted /sys");
+        return Err(InitError::Mount(format!(
+            "/sys mount failed (required for device management): {e}"
+        )));
     }
+    debug!("Mounted /sys");
 
-    // Mount devtmpfs - critical for device access
+    // Mount devtmpfs - REQUIRED: critical for device access
     if let Err(e) = mount::<str, str, str, str>(
         Some("none"),
         "/dev",
@@ -175,12 +201,13 @@ fn setup_filesystems() -> Result<(), InitError> {
         MsFlags::empty(),
         None,
     ) {
-        warn!(error = %e, "Failed to mount /dev");
-    } else {
-        debug!("Mounted /dev");
+        return Err(InitError::Mount(format!(
+            "/dev mount failed (required for device access): {e}"
+        )));
     }
+    debug!("Mounted /dev");
 
-    // Mount devpts - needed by runc/containerd for container PTY allocation
+    // Mount devpts - optional: needed by runc/containerd for container PTY allocation
     let _ = fs::create_dir_all("/dev/pts");
     if let Err(e) = mount::<str, str, str, str>(
         Some("devpts"),
@@ -189,12 +216,12 @@ fn setup_filesystems() -> Result<(), InitError> {
         MsFlags::empty(),
         Some("newinstance,ptmxmode=0666,mode=0620"),
     ) {
-        warn!(error = %e, "Failed to mount /dev/pts");
+        warn!(error = %e, "Failed to mount /dev/pts (optional)");
     } else {
         debug!("Mounted /dev/pts");
     }
 
-    // Mount /dev/shm - needed for POSIX shared memory in containers
+    // Mount /dev/shm - optional: needed for POSIX shared memory in containers
     let _ = fs::create_dir_all("/dev/shm");
     if let Err(e) = mount::<str, str, str, str>(
         Some("tmpfs"),
@@ -203,12 +230,12 @@ fn setup_filesystems() -> Result<(), InitError> {
         MsFlags::empty(),
         Some("size=64m"),
     ) {
-        warn!(error = %e, "Failed to mount /dev/shm");
+        warn!(error = %e, "Failed to mount /dev/shm (optional)");
     } else {
         debug!("Mounted /dev/shm");
     }
 
-    // Mount /dev/mqueue - needed for POSIX message queues
+    // Mount /dev/mqueue - optional: needed for POSIX message queues
     let _ = fs::create_dir_all("/dev/mqueue");
     if let Err(e) = mount::<str, str, str, str>(
         Some("mqueue"),
@@ -217,16 +244,16 @@ fn setup_filesystems() -> Result<(), InitError> {
         MsFlags::empty(),
         None,
     ) {
-        warn!(error = %e, "Failed to mount /dev/mqueue");
+        warn!(error = %e, "Failed to mount /dev/mqueue (optional)");
     } else {
         debug!("Mounted /dev/mqueue");
     }
 
-    // Mount tmpfs
+    // Mount tmpfs - optional: volatile scratch space
     if let Err(e) =
         mount::<str, str, str, str>(Some("none"), "/tmp", Some("tmpfs"), MsFlags::empty(), None)
     {
-        warn!(error = %e, "Failed to mount /tmp");
+        warn!(error = %e, "Failed to mount /tmp (optional)");
     } else {
         debug!("Mounted /tmp");
     }
@@ -241,7 +268,7 @@ fn setup_filesystems() -> Result<(), InitError> {
 fn setup_persistent_storage() {
     use std::process::Command;
 
-    let data_mount = "/data";
+    let data_mount = DATA_MOUNT;
 
     // Create mount point
     let _ = std::fs::create_dir_all(data_mount);
@@ -400,12 +427,12 @@ fn setup_networking() {
 /// Configure loopback interface
 fn configure_loopback() {
     // Using ip command instead of busybox ifconfig for modern networking
-    match Command::new("/sbin/ip")
+    match Command::new(IP_PATH)
         .args(["link", "set", "lo", "up"])
         .status()
     {
         Ok(status) if status.success() => {
-            match Command::new("/sbin/ip")
+            match Command::new(IP_PATH)
                 .args(["addr", "add", "127.0.0.1/8", "dev", "lo"])
                 .status()
             {
@@ -442,7 +469,7 @@ fn apply_network_config(config: &keel_config::network::NetworkConfig) {
 fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticConfig) {
     // Add IPv4 address if present
     if !cfg.ipv4_address.is_empty() {
-        match Command::new("/sbin/ip")
+        match Command::new(IP_PATH)
             .args(["addr", "add", &cfg.ipv4_address, "dev", iface_name])
             .status()
         {
@@ -459,7 +486,7 @@ fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticCo
 
         // Set IPv4 gateway if present
         if let Some(ref gateway) = cfg.gateway {
-            match Command::new("/sbin/ip")
+            match Command::new(IP_PATH)
                 .args(["route", "add", "default", "via", gateway, "dev", iface_name])
                 .status()
             {
@@ -478,7 +505,7 @@ fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticCo
 
     // Add IPv6 addresses
     for ipv6_addr in &cfg.ipv6_addresses {
-        match Command::new("/sbin/ip")
+        match Command::new(IP_PATH)
             .args(["-6", "addr", "add", ipv6_addr, "dev", iface_name])
             .status()
         {
@@ -496,7 +523,7 @@ fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticCo
 
     // Set IPv6 gateway if present
     if let Some(ref gateway6) = cfg.ipv6_gateway {
-        match Command::new("/sbin/ip")
+        match Command::new(IP_PATH)
             .args([
                 "-6", "route", "add", "default", "via", gateway6, "dev", iface_name,
             ])
@@ -537,7 +564,7 @@ fn apply_static_ip_config(iface_name: &str, cfg: &keel_config::network::StaticCo
 
     // Set MTU if non-default
     if cfg.mtu != 1500 {
-        match Command::new("/sbin/ip")
+        match Command::new(IP_PATH)
             .args(["link", "set", iface_name, "mtu", &cfg.mtu.to_string()])
             .status()
         {
@@ -561,7 +588,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
     info!(interface = %iface.name, "Configuring network interface");
 
     // Bring interface up
-    match Command::new("/sbin/ip")
+    match Command::new(IP_PATH)
         .args(["link", "set", &iface.name, "up"])
         .status()
     {
@@ -590,7 +617,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
             info!(interface = %iface.name, vlan_id = vlan_cfg.vlan_id, parent = %vlan_cfg.parent, "Configuring VLAN");
 
             // Create VLAN interface using ip link
-            match Command::new("/sbin/ip")
+            match Command::new(IP_PATH)
                 .args([
                     "link",
                     "add",
@@ -609,7 +636,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
                     debug!(interface = %iface.name, "VLAN interface created");
 
                     // Bring VLAN interface up
-                    if let Err(e) = Command::new("/sbin/ip")
+                    if let Err(e) = Command::new(IP_PATH)
                         .args(["link", "set", &iface.name, "up"])
                         .status()
                     {
@@ -639,7 +666,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
             info!(interface = %iface.name, mode = %bond_cfg.mode.as_str(), "Configuring Bond");
 
             // Create bond interface
-            match Command::new("/sbin/ip")
+            match Command::new(IP_PATH)
                 .args([
                     "link",
                     "add",
@@ -655,7 +682,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
                     debug!(interface = %iface.name, "Bond interface created");
 
                     // Bring bond interface up
-                    if let Err(e) = Command::new("/sbin/ip")
+                    if let Err(e) = Command::new(IP_PATH)
                         .args(["link", "set", &iface.name, "up"])
                         .status()
                     {
@@ -666,12 +693,12 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
                     // Enslave member interfaces
                     for slave in &bond_cfg.slaves {
                         // Bring slave down first
-                        let _ = Command::new("/sbin/ip")
+                        let _ = Command::new(IP_PATH)
                             .args(["link", "set", slave, "down"])
                             .status();
 
                         // Add to bond
-                        match Command::new("/sbin/ip")
+                        match Command::new(IP_PATH)
                             .args(["link", "set", slave, "master", &iface.name])
                             .status()
                         {
@@ -679,7 +706,7 @@ fn configure_interface(iface: &keel_config::network::InterfaceConfig) {
                                 debug!(interface = %iface.name, slave = %slave, "Enslaved interface to bond");
 
                                 // Bring slave back up
-                                let _ = Command::new("/sbin/ip")
+                                let _ = Command::new(IP_PATH)
                                     .args(["link", "set", slave, "up"])
                                     .status();
                             }
@@ -741,7 +768,7 @@ fn configure_route(route: &keel_config::network::RouteConfig) {
         args.extend_from_slice(&["metric", &metric_str]);
     }
 
-    match Command::new("/sbin/ip").args(&args).status() {
+    match Command::new(IP_PATH).args(&args).status() {
         Ok(status) if status.success() => {
             info!(destination = %route.destination, gateway = %route.gateway, "Route configured");
         }
@@ -760,20 +787,20 @@ fn configure_dhcp_fallback() {
 
     // For QEMU testing, use static IP that matches QEMU's default network
     // In production, this would start a proper DHCP client
-    match Command::new("/sbin/ip")
+    match Command::new(IP_PATH)
         .args(["link", "set", "eth0", "up"])
         .status()
     {
         Ok(status) if status.success() => {
             // Use QEMU's default network: 10.0.2.0/24
-            match Command::new("/sbin/ip")
+            match Command::new(IP_PATH)
                 .args(["addr", "add", "10.0.2.15/24", "dev", "eth0"])
                 .status()
             {
                 Ok(status) if status.success() => {
                     debug!("Set eth0 IP to 10.0.2.15/24");
                     // Add default route
-                    let _ = Command::new("/sbin/ip")
+                    let _ = Command::new(IP_PATH)
                         .args(["route", "add", "default", "via", "10.0.2.2", "dev", "eth0"])
                         .status();
                 }
@@ -918,22 +945,21 @@ fn check_test_mode() {
     }
 }
 
-/// Setup cgroup v2 filesystem
-fn setup_cgroups() {
+/// Setup cgroup v2 filesystem - REQUIRED: containerd and kubelet need cgroups
+fn setup_cgroups() -> Result<(), InitError> {
     let _ = fs::create_dir_all("/sys/fs/cgroup");
-    match mount::<str, str, str, str>(
+    if let Err(e) = mount::<str, str, str, str>(
         Some("cgroup2"),
         "/sys/fs/cgroup",
         Some("cgroup2"),
         MsFlags::empty(),
         None,
     ) {
-        Ok(_) => debug!("Mounted cgroup v2 at /sys/fs/cgroup"),
-        Err(e) => {
-            warn!(error = %e, "Failed to mount cgroup v2");
-            return;
-        }
+        return Err(InitError::Mount(format!(
+            "/sys/fs/cgroup mount failed (required for container resource management): {e}"
+        )));
     }
+    debug!("Mounted cgroup v2 at /sys/fs/cgroup");
 
     // Enable cgroup v2 controllers in the root cgroup.
     // Without this, sub-cgroups (e.g. kubepods/) won't have controller interface files
@@ -943,6 +969,8 @@ fn setup_cgroups() {
         Ok(_) => info!("Enabled cgroup v2 controllers: {}", controllers),
         Err(e) => warn!(error = %e, "Failed to enable cgroup v2 controllers"),
     }
+
+    Ok(())
 }
 
 /// Spawn a process with graceful error handling
@@ -1003,11 +1031,11 @@ fn reap_zombies() {
 /// Spawn kubelet with appropriate configuration
 /// Checks for kubeconfig and adds --kubeconfig argument if available
 fn spawn_kubelet() -> Option<Child> {
-    let kubelet_path = if std::path::Path::new("/var/lib/keel/bin/kubelet").exists() {
-        info!("Using override kubelet from /var/lib/keel/bin/kubelet");
-        "/var/lib/keel/bin/kubelet"
+    let kubelet_path = if std::path::Path::new(KUBELET_OVERRIDE_PATH).exists() {
+        info!("Using override kubelet from {}", KUBELET_OVERRIDE_PATH);
+        KUBELET_OVERRIDE_PATH
     } else {
-        "/usr/bin/kubelet"
+        KUBELET_PATH
     };
 
     // Ensure kubelet directories exist
@@ -1015,10 +1043,11 @@ fn spawn_kubelet() -> Option<Child> {
     let _ = fs::create_dir_all("/var/lib/kubelet");
 
     // Check if kubeconfig exists (set during bootstrap)
-    let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
-    let kubeconfig_path = "/var/lib/kubelet/kubeconfig"; // Permanent kubeconfig after CSR
+    let bootstrap_kubeconfig = BOOTSTRAP_KUBECONFIG_PATH;
+    let kubeconfig_path = PERMANENT_KUBECONFIG_PATH;
+    let kubelet_config_arg = format!("--config={KUBELET_CONFIG_PATH}");
     let mut args = vec![
-        "--config=/etc/kubernetes/kubelet-config.yaml",
+        kubelet_config_arg.as_str(),
         "--cert-dir=/var/lib/kubelet/pki",
         "--v=2",
     ];
@@ -1028,9 +1057,8 @@ fn spawn_kubelet() -> Option<Child> {
     // 1. Node name from bootstrap config (if bootstrapped)
     // 2. System hostname (if set)
     // 3. Generated fallback
-    let bootstrap_config_path = "/var/lib/keel/kubernetes/bootstrap.json";
     let hostname =
-        if let Ok(config) = keel_config::bootstrap::BootstrapConfig::load(bootstrap_config_path) {
+        if let Ok(config) = keel_config::bootstrap::BootstrapConfig::load(BOOTSTRAP_CONFIG_PATH) {
             info!(node_name = %config.node_name, "Using node name from bootstrap configuration");
             config.node_name
         } else {
@@ -1087,9 +1115,9 @@ fn import_preloaded_images() {
     // Check multiple locations for pre-loaded images:
     // 1. /usr/share/keel/images/ - bundled in the initramfs (e.g., pause image)
     // 2. /data/images/ - pre-populated on the data partition (e.g., kube-proxy, kindnet)
-    let image_dirs = ["/usr/share/keel/images", "/data/images"];
+    let ctr_path = CTR_PATH;
 
-    for images_dir in &image_dirs {
+    for images_dir in &IMAGE_DIRS {
         info!(dir = images_dir, "Scanning for pre-loaded container images");
         let entries = match fs::read_dir(images_dir) {
             Ok(entries) => entries,
@@ -1105,7 +1133,7 @@ fn import_preloaded_images() {
                 let path_str = path.to_string_lossy();
                 let file_size = fs::metadata(&*path_str).map(|m| m.len()).unwrap_or(0);
                 info!(image = %path_str, size_bytes = file_size, "Importing pre-loaded container image");
-                match Command::new("/usr/bin/ctr")
+                match Command::new(ctr_path)
                     .args(["-n", "k8s.io", "images", "import", &path_str])
                     .output()
                 {
@@ -1131,13 +1159,13 @@ fn import_preloaded_images() {
 fn supervise_services() -> Result<(), InitError> {
     // Start keel-agent first - it handles bootstrap
     info!("Starting keel-agent");
-    let mut agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
+    let mut agent = spawn_service("keel-agent", AGENT_PATH, &[]);
 
     // Start container services immediately
     // If bootstrap kubeconfig exists, kubelet will use it for cluster join
     // If not, kubelet runs in standalone mode and will be restarted when bootstrap completes
     info!("Starting containerd");
-    let mut containerd: Option<Child> = spawn_service("containerd", "/usr/bin/containerd", &[]);
+    let mut containerd: Option<Child> = spawn_service("containerd", CONTAINERD_PATH, &[]);
 
     // Give containerd a moment to initialize its socket
     thread::sleep(time::Duration::from_secs(2));
@@ -1148,21 +1176,63 @@ fn supervise_services() -> Result<(), InitError> {
     info!("Starting kubelet");
     let mut kubelet: Option<Child> = spawn_kubelet();
 
-    // Track restart counts for backoff
+    // Track restart counts for exponential backoff
     let mut agent_restart_count: u32 = 0;
+    let mut containerd_restart_count: u32 = 0;
     let max_restart_delay_secs: u64 = 60;
+    let base_delay_secs: u64 = 5;
+
+    // Track uptime for backoff reset (reset after 5 minutes of stability)
+    let mut agent_last_restart = std::time::Instant::now();
+    let mut containerd_last_restart = std::time::Instant::now();
+    let stability_threshold = std::time::Duration::from_secs(300);
 
     // Supervision loop
     loop {
         // Reap any zombie processes first
         reap_zombies();
 
-        // Check containerd - critical service
+        // Reset backoff counters after sustained uptime
+        if agent_restart_count > 0 && agent_last_restart.elapsed() > stability_threshold {
+            info!(
+                service = "keel-agent",
+                "Service stable for 5 minutes, resetting backoff"
+            );
+            agent_restart_count = 0;
+        }
+        if containerd_restart_count > 0 && containerd_last_restart.elapsed() > stability_threshold {
+            info!(
+                service = "containerd",
+                "Service stable for 5 minutes, resetting backoff"
+            );
+            containerd_restart_count = 0;
+        }
+
+        // Check containerd - critical service, restart with backoff
         if let Some(ref mut child) = containerd {
             if let Ok(Some(status)) = child.try_wait() {
-                error!(service = "containerd", exit_status = %status, "Critical service exited");
-                containerd = spawn_service("containerd", "/usr/bin/containerd", &[]);
-                if containerd.is_none() {
+                let delay = std::cmp::min(
+                    base_delay_secs.saturating_mul(
+                        1u64.checked_shl(containerd_restart_count)
+                            .unwrap_or(max_restart_delay_secs),
+                    ),
+                    max_restart_delay_secs,
+                );
+                error!(
+                    service = "containerd",
+                    exit_status = %status,
+                    attempt = containerd_restart_count + 1,
+                    backoff_secs = delay,
+                    "Critical service exited, restarting with backoff"
+                );
+
+                thread::sleep(time::Duration::from_secs(delay));
+
+                containerd = spawn_service("containerd", CONTAINERD_PATH, &[]);
+                if containerd.is_some() {
+                    containerd_restart_count = containerd_restart_count.saturating_add(1);
+                    containerd_last_restart = std::time::Instant::now();
+                } else {
                     error!("containerd restart failed - system degraded");
                 }
             }
@@ -1171,7 +1241,13 @@ fn supervise_services() -> Result<(), InitError> {
         // Check keel-agent - restart with backoff
         if let Some(ref mut child) = agent {
             if let Ok(Some(status)) = child.try_wait() {
-                let delay = std::cmp::min(1u64 << agent_restart_count, max_restart_delay_secs);
+                let delay = std::cmp::min(
+                    base_delay_secs.saturating_mul(
+                        1u64.checked_shl(agent_restart_count)
+                            .unwrap_or(max_restart_delay_secs),
+                    ),
+                    max_restart_delay_secs,
+                );
                 warn!(
                     service = "keel-agent",
                     exit_status = %status,
@@ -1182,9 +1258,10 @@ fn supervise_services() -> Result<(), InitError> {
 
                 thread::sleep(time::Duration::from_secs(delay));
 
-                agent = spawn_service("keel-agent", "/usr/bin/keel-agent", &[]);
+                agent = spawn_service("keel-agent", AGENT_PATH, &[]);
                 if agent.is_some() {
                     agent_restart_count = agent_restart_count.saturating_add(1);
+                    agent_last_restart = std::time::Instant::now();
                 }
             }
         }
@@ -1198,8 +1275,8 @@ fn supervise_services() -> Result<(), InitError> {
         }
 
         // Check for bootstrap kubeconfig to start or restart services
-        let bootstrap_kubeconfig = "/var/lib/keel/kubernetes/kubelet.kubeconfig";
-        let permanent_kubeconfig = "/var/lib/kubelet/kubeconfig";
+        let bootstrap_kubeconfig = BOOTSTRAP_KUBECONFIG_PATH;
+        let permanent_kubeconfig = PERMANENT_KUBECONFIG_PATH;
         let bootstrap_exists = std::path::Path::new(bootstrap_kubeconfig).exists();
         let permanent_exists = std::path::Path::new(permanent_kubeconfig).exists();
 
@@ -1211,7 +1288,7 @@ fn supervise_services() -> Result<(), InitError> {
         }
 
         // Handle explicit restart signal or permanent kubeconfig appearing
-        let should_restart = if std::path::Path::new("/run/keel/restart-kubelet").exists() {
+        let should_restart = if std::path::Path::new(RESTART_SIGNAL_PATH).exists() {
             // Explicit restart signal from keel-agent
             info!("Kubelet restart signal detected");
             true // Restart regardless of whether kubelet is running
@@ -1239,7 +1316,7 @@ fn supervise_services() -> Result<(), InitError> {
                 let _ = child.wait();
                 info!("Kubelet process stopped, preparing to respawn");
             }
-            let _ = fs::remove_file("/run/keel/restart-kubelet");
+            let _ = fs::remove_file(RESTART_SIGNAL_PATH);
             // Restart kubelet with new configuration
             info!("Calling spawn_kubelet() to restart with updated config");
             kubelet = spawn_kubelet();

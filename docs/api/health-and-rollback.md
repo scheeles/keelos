@@ -228,7 +228,7 @@ osctl --endpoint http://node:50051 rollback history
 **Python:**
 ```python
 import grpc
-from matic_api.node import node_pb2, node_pb2_grpc
+from keel_api.node import node_pb2, node_pb2_grpc
 
 # Create channel
 channel = grpc.insecure_channel('localhost:50051')

@@ -23,8 +23,11 @@ authentication:
     enabled: false
 
 # Authorization
+# Security: Use Webhook mode to delegate authorization decisions to the API server.
+# AlwaysAllow is insecure because it grants any authenticated request full access
+# to all kubelet endpoints (exec, logs, metrics), bypassing RBAC entirely.
 authorization:
-  mode: AlwaysAllow
+  mode: Webhook
 
 # TLS Certificate Configuration
 # Note: tlsCertFile and tlsPrivateKeyFile are not set here.
@@ -37,5 +40,7 @@ clusterDomain: cluster.local
 clusterDNS:
   - 10.96.0.10  # Default Kubernetes CoreDNS service IP
 
-# Read-only port for health checks
-readOnlyPort: 10255
+# Security: Disable the read-only port (10255) which exposes unauthenticated
+# metrics and health endpoints. Setting to 0 disables it entirely, forcing all
+# access through the authenticated HTTPS port (10250) instead.
+readOnlyPort: 0

@@ -13,13 +13,11 @@ KeelOS is an immutable, API-driven Linux distribution designed exclusively for h
 
 ## Directory Structure
 
-*   **/kernel**: Minimalist Linux Kernel configuration and patches.
-*   **/pkg**: Shared Go/Rust libraries for the OS components.
 *   **/cmd**: Binaries (`keel-init`, `keel-agent`, `osctl`).
-*   **/system**: Static manifests and bootstrap configuration.
+*   **/pkg**: Shared Rust library crates (`api`, `config`, `crypto`).
 *   **/tools**: Build systems and test harnesses.
 *   **/docs**: Documentation and API specifications.
-*   **/.ai-context**: Documentation for AI agents contributing to this repo.
+*   **/k8s**: Kubernetes RBAC manifests for cluster integration.
 
 
 ## Quick Start

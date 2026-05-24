@@ -4,7 +4,7 @@
 
 **Agent Deployment Model:**
 - Agent runs as **system process** (part of KeelOS base image)
-- Managed by systemd as a service
+- Managed by `keel-init` (PID 1 process supervisor)
 - **NOT** a K8s DaemonSet or workload
 - Built into the OS, starts on boot
 
@@ -37,7 +37,7 @@ This creates:
 
 ```
 1. KeelOS boots
-2. Systemd starts keel-agent service
+2. keel-init (PID 1) starts keel-agent
 3. Agent detects K8s (checks for service account token)
 4. Agent requests operational certificate via CSR
 5. K8s signs certificate (if RBAC allows)
@@ -77,10 +77,10 @@ ls -la /var/run/secrets/kubernetes.io/serviceaccount/
 export NODE_NAME=$(hostname)
 
 # 4. Start agent
-systemctl start keel-agent
+# keel-agent is started automatically by keel-init on boot
 
 # 5. Check logs for cert initialization
-journalctl -u keel-agent -f
+osctl diag logs --component keel-agent
 # Should see: "✓ K8s operational certificates initialized"
 ```
 
@@ -88,7 +88,7 @@ journalctl -u keel-agent -f
 
 | Aspect | Process (Our Approach) | DaemonSet |
 |--------|------------------------|-----------|
-| Lifecycle | OS-managed (systemd) | K8s-managed |
+| Lifecycle | OS-managed (keel-init) | K8s-managed |
 | Deployment | Built into OS image | Container image |
 | Updates | OS update mechanism | K8s rolling update |
 | Access | Direct host access | Via hostNetwork/hostPID |
@@ -99,7 +99,7 @@ Our approach is better because:
 - ✅ Agent available even if K8s is down
 - ✅ Can bootstrap K8s itself
 - ✅ Direct disk access (no container overhead)
-- ✅ Native systemd integration
+- ✅ Native keel-init process supervision
 - ✅ Part of immutable OS image
 
 ## Certificate Management

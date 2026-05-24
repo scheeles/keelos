@@ -75,11 +75,33 @@ impl NodeService for HelperNodeService {
     ) -> Result<Response<GetStatusResponse>, Status> {
         rbac::authorize(&_request, rbac::Role::Viewer)?;
         debug!("Received get_status request");
+
+        // Read real hostname via nix::unistd::gethostname()
+        let hostname = nix::unistd::gethostname()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        // Read real kernel version from /proc/sys/kernel/osrelease
+        let kernel_version = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        // Read real uptime from /proc/uptime (first field is seconds as float)
+        let uptime_seconds = std::fs::read_to_string("/proc/uptime")
+            .ok()
+            .and_then(|content| {
+                content
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<f32>().ok())
+            })
+            .unwrap_or(0.0);
+
         let reply = GetStatusResponse {
-            hostname: "keel-node".to_string(),    // TODO: Get from hostname
-            kernel_version: "6.6.14".to_string(), // TODO: Get from uname
+            hostname,
+            kernel_version,
             os_version: "0.1.0".to_string(),
-            uptime_seconds: 0.0, // TODO: Get from /proc/uptime
+            uptime_seconds,
         };
         Ok(Response::new(reply))
     }

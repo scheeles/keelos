@@ -62,12 +62,13 @@ pub fn get_active_partition() -> io::Result<PartitionInfo> {
         }
     }
 
-    // Ultimate fallback: assume slot A
-    warn!("Could not determine active partition, assuming slot A");
-    Ok(PartitionInfo {
-        device: format!("{}{}", DEFAULT_DISK, SLOT_A_INDEX),
-        index: SLOT_A_INDEX,
-    })
+    // No fallback — partition detection failure is a hard error.
+    // Silently assuming a default risks overwriting the active partition.
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Could not determine active partition from /proc/cmdline or /proc/mounts. \
+         Cannot safely determine which partition is inactive for updates.",
+    ))
 }
 
 /// Resolve a PARTUUID to a device path
@@ -89,11 +90,15 @@ fn resolve_partuuid(partuuid: &str) -> io::Result<PartitionInfo> {
         }
         Err(e) => {
             warn!(partuuid = %partuuid, error = %e, "Could not resolve PARTUUID");
-            // Fallback to slot A
-            Ok(PartitionInfo {
-                device: format!("{}{}", DEFAULT_DISK, SLOT_A_INDEX),
-                index: SLOT_A_INDEX,
-            })
+            // No fallback — partition detection failure is a hard error.
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "Could not resolve PARTUUID '{}': {}. \
+                     Cannot safely determine active partition.",
+                    partuuid, e
+                ),
+            ))
         }
     }
 }
@@ -280,7 +285,7 @@ async fn apply_delta_update(
     info!(device = %target_device, "Delta update completed");
 
     // Calculate bandwidth savings (delta size vs full image size)
-    let bytes_saved = new_image.len() as u64 - delta_size;
+    let bytes_saved = (new_image.len() as u64).saturating_sub(delta_size);
     Ok(bytes_saved)
 }
 
@@ -428,8 +433,11 @@ pub fn switch_boot_partition(target_index: u32) -> io::Result<()> {
         "Boot partition switched"
     );
 
-    // Also update /etc/keel/boot.next as a software-level indicator (if writable)
-    let boot_marker = "/tmp/boot.next";
+    // Write boot marker to persistent storage for software-level tracking
+    let boot_marker = "/var/lib/keel/boot.next";
+    if let Some(parent) = std::path::Path::new(boot_marker).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
     if let Err(e) = fs::write(boot_marker, format!("{}", target_index)) {
         warn!(error = %e, "Could not write boot marker");
     }
@@ -450,7 +458,17 @@ struct RollbackState {
 /// Load rollback state from disk
 fn load_rollback_state() -> RollbackState {
     match fs::read_to_string(ROLLBACK_STATE_FILE) {
-        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Ok(json) => match serde_json::from_str(&json) {
+            Ok(state) => state,
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    path = ROLLBACK_STATE_FILE,
+                    "Corrupt rollback state file, using defaults"
+                );
+                RollbackState::default()
+            }
+        },
         Err(_) => RollbackState::default(),
     }
 }

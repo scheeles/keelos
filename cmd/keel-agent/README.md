@@ -19,7 +19,7 @@ The API endpoint for KeelOS node management.
 
 ## API Specs
 
-The Protocol Buffer definitions are located in `crates/matic-proto`.
+The Protocol Buffer definitions are located in `pkg/api`.
 
 ## Usage
 

@@ -44,8 +44,11 @@ impl CertRenewalManager {
     }
 
     /// Start the background renewal loop
-    /// This task runs indefinitely, checking and renewing certificates as needed
-    pub async fn start_renewal_loop(self: Arc<Self>) {
+    /// This task runs indefinitely until the cancellation token is triggered
+    pub async fn start_renewal_loop(
+        self: Arc<Self>,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) {
         info!(
             "Starting certificate auto-renewal (checking every {} hours, renewal threshold {} days)",
             self.check_interval.as_secs() / 3600,
@@ -55,10 +58,16 @@ impl CertRenewalManager {
         let mut ticker = interval(self.check_interval);
 
         loop {
-            ticker.tick().await;
-
-            if let Err(e) = self.check_and_renew().await {
-                error!("Certificate renewal check failed: {}", e);
+            tokio::select! {
+                _ = ticker.tick() => {
+                    if let Err(e) = self.check_and_renew().await {
+                        error!("Certificate renewal check failed: {}", e);
+                    }
+                }
+                _ = cancel_token.cancelled() => {
+                    info!("Certificate auto-renewal task shutting down gracefully");
+                    break;
+                }
             }
         }
     }

@@ -1477,6 +1477,7 @@ dependencies = [
  "keel-config",
  "keel-crypto",
  "kube",
+ "nix",
  "once_cell",
  "opentelemetry",
  "opentelemetry-otlp",

@@ -269,7 +269,7 @@ kubectl apply -f k8s/rbac.yaml
 export NODE_NAME=worker-1
 
 # Restart agent
-systemctl restart keel-agent
+# keel-agent restarts automatically via keel-init supervision
 ```
 
 ### Auto-Renewal Failing
@@ -283,7 +283,7 @@ ERROR Certificate renewal check failed: Failed to request certificate
 
 1. **Check agent logs:**
 ```bash
-journalctl -u keel-agent -f | grep -i renewal
+osctl diag logs --component keel-agent | grep -i renewal
 ```
 
 2. **Verify K8s API access:**
@@ -326,7 +326,7 @@ echo $OTLP_ENDPOINT
 
 2. **Agent logs show metrics:**
 ```bash
-journalctl -u keel-agent | grep "metrics updated"
+osctl diag logs --component keel-agent | grep "metrics updated"
 ```
 
 3. **OTLP collector receiving data:**

@@ -1,17 +1,26 @@
-#!/bin/zsh
+#!/bin/bash
 set -e
 
 # Project root is 2 levels up from this script (tools/builder)
-# zsh/bash compatible way to find directory of this script
-SCRIPT_DIR=${0:a:h}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}/../.."
 IMAGE_NAME="keelos-builder"
+
+# Parse arguments
+NO_INTERACTIVE=false
+for arg in "$@"; do
+    case "$arg" in
+        --no-interactive)
+            NO_INTERACTIVE=true
+            ;;
+    esac
+done
 
 # Detect host architecture
 HOST_ARCH=$(uname -m)
 echo "=== Detected host architecture: ${HOST_ARCH} ==="
 
-K8S_VERSION=${K8S_VERSION:-v1.29.0}
+K8S_VERSION=${K8S_VERSION:-v1.31.0}
 echo "=== Building Builder Image (K8S_VERSION=${K8S_VERSION}) ==="
 
 # Build with platform detection
@@ -30,6 +39,12 @@ else
         --build-arg K8S_VERSION="${K8S_VERSION}" \
         -t "${IMAGE_NAME}" \
         "${PROJECT_ROOT}/tools/builder"
+fi
+
+# If --no-interactive is passed or stdin is not a TTY, just build and exit
+if [ "${NO_INTERACTIVE}" = true ] || [ ! -t 0 ]; then
+    echo "=== Builder image built successfully ==="
+    exit 0
 fi
 
 echo "=== Entering Build Environment ==="

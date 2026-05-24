@@ -15,7 +15,7 @@ mod cert_store;
 use cert_store::{extract_node_from_endpoint, CertStore};
 
 #[derive(Parser)]
-#[command(name = "osctl")]
+#[command(name = "osctl", version)]
 #[command(about = "KeelOS CLI Client", long_about = None)]
 struct Cli {
     #[arg(long, default_value = "http://[::1]:50051")]
@@ -270,9 +270,19 @@ async fn connect_with_auto_tls(
         // Create TLS identity
         let identity = tonic::transport::Identity::from_pem(cert_pem, key_pem);
 
+        // Add server CA verification if available
+        let mut tls_config = tonic::transport::ClientTlsConfig::new().identity(identity);
+
+        if let Some(ref ca_path) = paths.ca {
+            let ca_pem = std::fs::read_to_string(ca_path)?;
+            tls_config = tls_config.ca_certificate(tonic::transport::Certificate::from_pem(ca_pem));
+        } else {
+            eprintln!("⚠️  No CA certificate found for server verification");
+        }
+
         // Configure TLS endpoint with timeout and keepalive
         let tls_endpoint = tonic::transport::Channel::from_shared(endpoint.to_string())?
-            .tls_config(tonic::transport::ClientTlsConfig::new().identity(identity))?
+            .tls_config(tls_config)?
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(30))
             .http2_keep_alive_interval(std::time::Duration::from_secs(10))
@@ -305,7 +315,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::Status => {
             let request = tonic::Request::new(GetStatusRequest {});
             let response = client.get_status(request).await?;
-            println!("RESPONSE={:?}", response.into_inner());
+            let status = response.into_inner();
+
+            println!("\n📊 Node Status:\n");
+            println!("  Hostname:     {}", status.hostname);
+            println!("  OS Version:   {}", status.os_version);
+            println!("  Kernel:       {}", status.kernel_version);
+            println!("  Uptime:       {:.1}s", status.uptime_seconds);
         }
         Commands::Reboot { reason } => {
             let request = tonic::Request::new(RebootRequest {

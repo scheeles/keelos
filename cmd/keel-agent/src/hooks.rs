@@ -2,7 +2,8 @@
 //!
 //! Provides safe execution of pre/post update hooks.
 
-use std::process::Command;
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 use tracing::{error, info, warn};
 
 /// Execute a hook command
@@ -25,10 +26,13 @@ pub async fn execute_hook(command: &str, phase: &str) -> Result<(), String> {
     let program = parts[0];
     let args = &parts[1..];
 
-    let result = Command::new(program).args(args).status();
+    const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+
+    let result: Result<Result<std::process::ExitStatus, std::io::Error>, _> =
+        timeout(HOOK_TIMEOUT, Command::new(program).args(args).status()).await;
 
     match result {
-        Ok(status) => {
+        Ok(Ok(status)) => {
             if status.success() {
                 info!(
                     phase = phase,
@@ -42,9 +46,14 @@ pub async fn execute_hook(command: &str, phase: &str) -> Result<(), String> {
                 Err(msg)
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             let msg = format!("Failed to execute hook: {}", e);
             error!(phase = phase, error = %msg, "Hook execution error");
+            Err(msg)
+        }
+        Err(_) => {
+            let msg = format!("Hook timed out after {}s", HOOK_TIMEOUT.as_secs());
+            error!(phase = phase, error = %msg, "Hook timeout");
             Err(msg)
         }
     }
