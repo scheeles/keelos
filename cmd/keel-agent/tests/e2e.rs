@@ -2,6 +2,9 @@
 //!
 //! These tests start a real gRPC server and connect a client, exercising the
 //! full request/response lifecycle over the transport layer.
+//!
+//! Note: Tests run without TLS, so KEEL_ALLOW_INSECURE is set to allow
+//! unauthenticated requests through RBAC.
 
 use keel_api::node::node_service_client::NodeServiceClient;
 use keel_api::node::node_service_server::NodeServiceServer;
@@ -17,6 +20,9 @@ use tonic::transport::{Channel, Server};
 /// The server runs in a background task. The returned address can be used to
 /// connect a client.
 async fn start_test_server() -> Result<SocketAddr, Box<dyn std::error::Error>> {
+    // Allow unauthenticated requests in e2e tests (no TLS configured)
+    std::env::set_var("KEEL_ALLOW_INSECURE", "1");
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
 

@@ -1,6 +1,6 @@
 //! KeelOS Agent - gRPC management server
 //!
-//! The Matic Agent provides a gRPC API for managing the node, including:
+//! The KeelOS Agent provides a gRPC API for managing the node, including:
 //! - Node status queries
 //! - Reboot scheduling
 //! - A/B partition updates
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         diagnostics,
     };
 
-    info!(grpc_addr = %grpc_addr, "Matic Agent starting");
+    info!(grpc_addr = %grpc_addr, "KeelOS Agent starting");
 
     // Initialize K8s operational certificates if running in cluster
     if let Some((cert_path, key_path)) = init_k8s_certificates().await {
@@ -203,15 +203,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("mTLS enabled successfully");
             }
             Err(e) => {
-                warn!("Failed to configure TLS: {}. Running without mTLS.", e);
+                // SECURITY: TLS configuration failure is fatal.
+                // Running without mTLS defeats the entire security model.
+                error!(
+                    "FATAL: Failed to configure TLS: {}. Refusing to start without mTLS.",
+                    e
+                );
+                return Err(format!(
+                    "TLS configuration failed: {}. \
+                     Set KEEL_ALLOW_INSECURE=1 to start without mTLS (DEVELOPMENT ONLY).",
+                    e
+                )
+                .into());
             }
         }
-    } else {
+    } else if std::env::var("KEEL_ALLOW_INSECURE").is_ok() {
         warn!(
-            "Server certificates not found at {}. Running without mTLS.",
+            "KEEL_ALLOW_INSECURE is set. Running WITHOUT mTLS. \
+             THIS IS INSECURE AND MUST NOT BE USED IN PRODUCTION."
+        );
+    } else {
+        error!(
+            "Server certificates not found at {}. Cannot start without mTLS.",
             server_cert_path
         );
-        info!("To enable mTLS, generate server certificate and key.");
+        return Err(format!(
+            "Server certificate not found at {}. \
+             Generate certificates or set KEEL_ALLOW_INSECURE=1 for development.",
+            server_cert_path
+        )
+        .into());
     }
 
     // Start health/metrics HTTP server
@@ -223,12 +244,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let health_server = tokio::spawn(async move {
         info!("Starting health/metrics HTTP server");
-        let listener = tokio::net::TcpListener::bind(health_addr)
-            .await
-            .expect("Failed to bind health server");
-        axum::serve(listener, health_router)
-            .await
-            .expect("Health server failed");
+        let listener = match tokio::net::TcpListener::bind(health_addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!(error = %e, "Failed to bind health server");
+                return;
+            }
+        };
+        if let Err(e) = axum::serve(listener, health_router).await {
+            error!(error = %e, "Health server failed");
+        }
     });
 
     // Start rollback supervisor
@@ -447,6 +472,9 @@ mod tests {
     };
 
     fn make_test_service() -> HelperNodeService {
+        // Allow unauthenticated requests in unit tests (no TLS configured)
+        std::env::set_var("KEEL_ALLOW_INSECURE", "1");
+
         HelperNodeService {
             scheduler: Arc::new(UpdateScheduler::new("/tmp/test-schedules.json")),
             health_checker: Arc::new(HealthChecker::new(HealthCheckerConfig::default())),

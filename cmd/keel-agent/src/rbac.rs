@@ -101,12 +101,16 @@ pub fn role_from_cert_der(cert_der: &[u8]) -> Result<Role, String> {
 /// Returns `Status::permission_denied` if the client's role is insufficient.
 pub fn authorize<T>(request: &Request<T>, required: Role) -> Result<(), Status> {
     let Some(peer_certs) = request.peer_certs() else {
-        // No TLS peer certs — either TLS is not configured (dev mode)
-        // or client connected without a certificate.
-        // When mTLS is properly configured, tonic validates the cert chain;
-        // absence of peer_certs here means TLS is disabled entirely.
-        debug!("No peer certificates found — allowing request (TLS may be disabled)");
-        return Ok(());
+        // No TLS peer certs — either TLS is not configured or client connected
+        // without a certificate. Only allow in development mode.
+        if std::env::var("KEEL_ALLOW_INSECURE").is_ok() {
+            debug!("No peer certificates found — allowing request (KEEL_ALLOW_INSECURE is set)");
+            return Ok(());
+        }
+        warn!("Rejecting unauthenticated request — no client certificate presented");
+        return Err(Status::unauthenticated(
+            "Client certificate required. No TLS peer certificate found.",
+        ));
     };
 
     let first_cert = peer_certs
@@ -234,11 +238,12 @@ mod tests {
     // --- authorize() tests (without TLS — dev mode) ---
 
     #[test]
-    fn test_authorize_no_tls_allows_all() {
-        // Without TLS, peer_certs() returns None, so all requests are allowed
+    fn test_authorize_no_tls_rejects_unauthenticated() {
+        // Without TLS peer certs, requests should be rejected
+        // (unless KEEL_ALLOW_INSECURE is set, which is not set in tests)
         let request = Request::new(());
-        assert!(authorize(&request, Role::Admin).is_ok());
-        assert!(authorize(&request, Role::Operator).is_ok());
-        assert!(authorize(&request, Role::Viewer).is_ok());
+        assert!(authorize(&request, Role::Admin).is_err());
+        assert!(authorize(&request, Role::Operator).is_err());
+        assert!(authorize(&request, Role::Viewer).is_err());
     }
 }

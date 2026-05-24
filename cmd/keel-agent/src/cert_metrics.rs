@@ -140,15 +140,29 @@ impl CertificateMetrics {
 
 impl Default for CertificateMetrics {
     fn default() -> Self {
-        Self::new().expect("Failed to create CertificateMetrics")
+        match Self::new() {
+            Ok(metrics) => metrics,
+            Err(e) => {
+                error!(error = %e, "Failed to create CertificateMetrics, using no-op fallback");
+                // Return a no-op instance with dummy counters that won't report
+                let meter = global::meter("keel_agent_fallback");
+                Self {
+                    renewals_success_counter: meter
+                        .u64_counter("keel.certificate.renewals.success")
+                        .build(),
+                    renewals_error_counter: meter
+                        .u64_counter("keel.certificate.renewals.errors")
+                        .build(),
+                    cert_state: Arc::new(Mutex::new(None)),
+                }
+            }
+        }
     }
 }
 
 /// Global certificate metrics instance
 static CERT_METRICS: once_cell::sync::Lazy<Arc<CertificateMetrics>> =
-    once_cell::sync::Lazy::new(|| {
-        Arc::new(CertificateMetrics::new().expect("Failed to initialize certificate metrics"))
-    });
+    once_cell::sync::Lazy::new(|| Arc::new(CertificateMetrics::default()));
 
 /// Get global certificate metrics instance
 pub fn cert_metrics() -> Arc<CertificateMetrics> {
