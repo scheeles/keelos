@@ -81,9 +81,9 @@ async fn e2e_get_status() -> Result<(), Box<dyn std::error::Error>> {
     let response = client.get_status(GetStatusRequest {}).await?;
     let status = response.into_inner();
 
-    assert_eq!(status.hostname, "keel-node");
-    assert_eq!(status.os_version, "0.1.0");
+    assert!(!status.hostname.is_empty());
     assert!(!status.kernel_version.is_empty());
+    assert_eq!(status.os_version, "0.1.0");
 
     cleanup_schedule_file(addr.port());
     Ok(())

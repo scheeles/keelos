@@ -1,4 +1,4 @@
-# pkg/crypto (Matic Identity)
+# pkg/crypto (KeelOS Crypto)
 
 **Responsibility**: mTLS, Certificate Generation, and Identity management.
 

@@ -17,7 +17,7 @@ osctl init bootstrap
 openssl x509 -in /var/lib/keel/crypto/operational.pem -noout -enddate
 
 # Check auto-renewal status (via logs)
-journalctl -u keel-agent | grep -i renewal
+osctl diag logs --component keel-agent | grep -i renewal
 
 # Trigger manual rotation (via RPC)
 grpcurl -plaintext localhost:50051 keel.v1.NodeService/RotateCertificate
@@ -91,7 +91,7 @@ osctl init bootstrap
 ### Auto-Renewal Failing
 ```bash
 # Check logs
-journalctl -u keel-agent -f | grep renewal
+osctl diag logs --component keel-agent | grep renewal
 
 # Verify K8s access
 kubectl get csr | grep keel
@@ -107,7 +107,7 @@ kubectl auth can-i create certificatesigningrequests \
 echo $OTLP_ENDPOINT
 
 # Verify agent logs
-journalctl -u keel-agent | grep "metrics updated"
+osctl diag logs --component keel-agent | grep "metrics updated"
 ```
 
 ## Configuration
@@ -170,7 +170,7 @@ grpcurl -plaintext localhost:50051 \
 cp /var/lib/keel/crypto/operational.pem.backup \
    /var/lib/keel/crypto/operational.pem
    
-systemctl restart keel-agent
+# keel-agent restarts automatically via keel-init supervision
 ```
 
 ## See Also

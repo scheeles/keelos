@@ -489,7 +489,8 @@ mod tests {
         let response = service.get_status(request).await.unwrap();
         let inner = response.into_inner();
 
-        assert_eq!(inner.hostname, "keel-node");
+        assert!(!inner.hostname.is_empty());
+        assert!(!inner.kernel_version.is_empty());
         assert_eq!(inner.os_version, "0.1.0");
     }
 

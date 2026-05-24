@@ -52,9 +52,9 @@ KeelOS uses a GPT partition table with the following layout:
 | Partition | Label         | Purpose                        |
 |-----------|---------------|--------------------------------|
 | 1         | `ESP`         | EFI System Partition (unused in direct kernel boot) |
-| 2         | `MATIC_ROOT_A`| Primary OS image (SquashFS)    |
-| 3         | `MATIC_ROOT_B`| Secondary OS image (for updates) |
-| 4         | `MATIC_STATE` | Persistent data (overlay, etcd, logs) |
+| 2         | `KEEL_ROOT_A` | Primary OS image (SquashFS)    |
+| 3         | `KEEL_ROOT_B` | Secondary OS image (for updates) |
+| 4         | `KEEL_STATE`  | Persistent data (overlay, etcd, logs) |
 
 ## Update Mechanism
 
