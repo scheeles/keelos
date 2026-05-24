@@ -59,7 +59,7 @@ jobs:
   # ============================================================================
   
   build:
-    needs: [lint]
+    needs: [lint, security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

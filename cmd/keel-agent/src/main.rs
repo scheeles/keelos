@@ -119,10 +119,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize diagnostics manager
     let diagnostics = Arc::new(DiagnosticsManager::new());
 
+    // Create global cancellation token for graceful shutdown
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+
     // Start background executor for scheduled updates
     let executor_scheduler = scheduler.clone();
+    let executor_token = cancel_token.clone();
     tokio::spawn(async move {
-        schedule_executor(executor_scheduler).await;
+        schedule_executor(executor_scheduler, executor_token).await;
     });
 
     let node_service = HelperNodeService {
@@ -153,9 +157,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let renewal_manager = Arc::new(CertRenewalManager::new(renewal_config));
+        let renewal_token = cancel_token.clone();
 
         tokio::spawn(async move {
-            renewal_manager.start_renewal_loop().await;
+            renewal_manager.start_renewal_loop(renewal_token).await;
         });
 
         info!("Certificate auto-renewal enabled (threshold: 30 days, check interval: 24 hours)");
@@ -242,6 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let health_router = health::create_health_router(health_state);
 
+    let health_token = cancel_token.clone();
     let health_server = tokio::spawn(async move {
         info!("Starting health/metrics HTTP server");
         let listener = match tokio::net::TcpListener::bind(health_addr).await {
@@ -251,7 +257,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
         };
-        if let Err(e) = axum::serve(listener, health_router).await {
+        if let Err(e) = axum::serve(listener, health_router)
+            .with_graceful_shutdown(async move { health_token.cancelled().await })
+            .await
+        {
             error!(error = %e, "Health server failed");
         }
     });
@@ -259,8 +268,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Start rollback supervisor
     let rb_health = health_checker.clone();
     let rb_scheduler = scheduler.clone();
+    let rb_token = cancel_token.clone();
     tokio::spawn(async move {
-        start_rollback_supervisor(rb_health, rb_scheduler).await;
+        start_rollback_supervisor(rb_health, rb_scheduler, rb_token).await;
     });
 
     // Initialize audit logging
@@ -270,12 +280,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start gRPC server
     info!(addr = %grpc_addr, "Starting gRPC server");
+    let grpc_token = cancel_token.clone();
+
+    // Setup gRPC health reporter
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<NodeServiceServer<HelperNodeService>>()
+        .await;
+
     let grpc_server = builder
         .layer(audit_layer)
+        .add_service(health_service)
         .add_service(NodeServiceServer::new(node_service))
-        .serve(grpc_addr);
+        .serve_with_shutdown(grpc_addr, async move { grpc_token.cancelled().await });
 
-    // Run both servers concurrently
+    // Handle graceful shutdown signals
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+
     tokio::select! {
         result = grpc_server => {
             if let Err(e) = result {
@@ -287,7 +308,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 warn!(error = %e, "Health server error");
             }
         }
+        _ = tokio::signal::ctrl_c() => {
+            info!("Received SIGINT, initiating graceful shutdown...");
+            cancel_token.cancel();
+        }
+        _ = sigterm.recv() => {
+            info!("Received SIGTERM, initiating graceful shutdown...");
+            cancel_token.cancel();
+        }
     }
+
+    // Give background tasks a brief moment to wind down cleanly
+    info!("Waiting for background tasks to wind down...");
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     // Shutdown telemetry
     telemetry::shutdown_telemetry();
@@ -296,14 +329,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Background task executor for scheduled updates
-async fn schedule_executor(scheduler: Arc<UpdateScheduler>) {
+async fn schedule_executor(
+    scheduler: Arc<UpdateScheduler>,
+    cancel_token: tokio_util::sync::CancellationToken,
+) {
     use tokio::time::{sleep, Duration};
 
     info!("Background schedule executor started");
 
     loop {
         // Check for due schedules every 30 seconds
-        sleep(Duration::from_secs(30)).await;
+        tokio::select! {
+            _ = sleep(Duration::from_secs(30)) => {}
+            _ = cancel_token.cancelled() => {
+                info!("Schedule executor task shutting down gracefully");
+                break;
+            }
+        }
 
         let due_schedules = scheduler.get_due_schedules().await;
 
@@ -407,7 +449,11 @@ async fn execute_scheduled_update(
 const DEFAULT_HEALTH_CHECK_GRACE_SECS: u64 = 60;
 
 /// Rollback supervisor checks health after boot and triggers rollback if critical
-async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<UpdateScheduler>) {
+async fn start_rollback_supervisor(
+    health: Arc<HealthChecker>,
+    scheduler: Arc<UpdateScheduler>,
+    cancel_token: tokio_util::sync::CancellationToken,
+) {
     use tokio::time::{sleep, Duration};
 
     // Use health check timeout from the latest schedule if available
@@ -421,7 +467,13 @@ async fn start_rollback_supervisor(health: Arc<HealthChecker>, scheduler: Arc<Up
         grace_secs = grace_secs,
         "Rollback supervisor started - waiting for system stability"
     );
-    sleep(Duration::from_secs(grace_secs)).await;
+    tokio::select! {
+        _ = sleep(Duration::from_secs(grace_secs)) => {}
+        _ = cancel_token.cancelled() => {
+            info!("Rollback supervisor task shutting down gracefully");
+            return;
+        }
+    }
 
     // Run critical check
     let (status, _) = health.run_all_checks().await;
