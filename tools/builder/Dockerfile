@@ -33,6 +33,7 @@ RUN apt-get update && apt-get install -y \
     e2fsprogs \
     libseccomp2 \
     iptables \
+    skopeo \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GRUB only on x86_64 (not available on ARM)
@@ -48,7 +49,7 @@ RUN wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504
     chmod +x /usr/local/bin/busybox
 
 # Install static binaries for the runtime (x86_64 target)
-RUN export CONTAINERD_VERSION=1.7.11 && \
+RUN export CONTAINERD_VERSION=1.7.32 && \
     wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504 https://github.com/containerd/containerd/releases/download/v${CONTAINERD_VERSION}/containerd-static-${CONTAINERD_VERSION}-linux-amd64.tar.gz && \
     tar Cxzvf /usr/local /containerd-static-${CONTAINERD_VERSION}-linux-amd64.tar.gz && \
     rm /containerd-static-${CONTAINERD_VERSION}-linux-amd64.tar.gz
@@ -59,19 +60,17 @@ RUN wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504
     chmod +x /usr/local/bin/kubelet
 
 # Install runc (x86_64 target)
-RUN export RUNC_VERSION=1.1.10 && \
+RUN export RUNC_VERSION=1.1.12 && \
     wget --tries=5 --retry-connrefused --retry-on-http-error=429,500,502,503,504 https://github.com/opencontainers/runc/releases/download/v${RUNC_VERSION}/runc.amd64 && \
     install -m 755 runc.amd64 /usr/local/sbin/runc && \
     rm runc.amd64
 
 # Pre-download pause container image for offline use
 # This avoids needing network access to pull the image during container creation
-RUN CRANE_VERSION=0.19.1 && \
-    wget -O /tmp/crane.tar.gz https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz && \
-    tar -xzf /tmp/crane.tar.gz -C /usr/local/bin crane && \
-    rm /tmp/crane.tar.gz && \
-    crane pull --platform linux/amd64 registry.k8s.io/pause:3.9 /usr/local/share/pause-3.9.tar && \
-    rm /usr/local/bin/crane
+RUN mkdir -p /usr/local/share && \
+    skopeo --override-os linux --override-arch amd64 copy \
+    docker://registry.k8s.io/pause:3.9 \
+    docker-archive:/usr/local/share/pause-3.9.tar:registry.k8s.io/pause:3.9
 
 # Install CNI plugins (x86_64 target)
 RUN export CNI_VERSION=1.6.2 && \

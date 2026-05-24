@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-KERNEL_VERSION="6.6.14"
+KERNEL_VERSION="6.6.141"
 KERNEL_URL="https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-${KERNEL_VERSION}.tar.xz"
 CACHE_DIR="/keelos/.cache/kernel"
 # Build in ephemeral container FS which is case-sensitive (fixes Mac host mount issues)
