@@ -20,9 +20,9 @@ if [ -f "${OUTPUT_DIR}/bzImage" ]; then
 fi
 
 echo ">>> Checking for Kernel Source Tarball..."
-if [ ! -f "${CACHE_DIR}/linux.tar.xz" ]; then
+if [ ! -f "${CACHE_DIR}/linux-${KERNEL_VERSION}.tar.xz" ]; then
     echo "Downloading Kernel ${KERNEL_VERSION}..."
-    wget -c "${KERNEL_URL}" -O "${CACHE_DIR}/linux.tar.xz"
+    wget -c "${KERNEL_URL}" -O "${CACHE_DIR}/linux-${KERNEL_VERSION}.tar.xz"
 fi
 
 echo ">>> Extracting Source to Ephemeral Build Dir..."
@@ -30,7 +30,7 @@ echo ">>> Extracting Source to Ephemeral Build Dir..."
 if [ -d "${SRC_DIR}" ]; then
     rm -rf "${SRC_DIR}"
 fi
-tar -xf "${CACHE_DIR}/linux.tar.xz" -C "${BUILD_DIR}"
+tar -xf "${CACHE_DIR}/linux-${KERNEL_VERSION}.tar.xz" -C "${BUILD_DIR}"
 
 cd "${SRC_DIR}"
 
