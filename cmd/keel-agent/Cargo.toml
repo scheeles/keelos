@@ -32,7 +32,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "json", "env-filter"]
 # OpenTelemetry for observability
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
-opentelemetry_sdk = { version = "0.31", features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 tracing-opentelemetry = "0.32"
 sysinfo = "0.38"
 async-trait = "0.1"
