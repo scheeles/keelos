@@ -10,12 +10,31 @@ TIMEOUT=180
 echo ">>> Starting Phase 5 Update Test..."
 
 # 1. Setup Disk and Initramfs
-docker run --rm \
-    -v "${PROJECT_ROOT}:/keelos" \
-    -v "keelos-cargo-cache:/root/.cargo/registry" \
-    -v "keelos-target-cache:/keelos/target" \
-    keelos-builder \
-    /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package keel-init && cargo build --release --target x86_64-unknown-linux-musl --package keel-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
+#
+# CI already produces these artifacts in the `build` job and this job declares
+# `needs: [build]`, so rebuilding here duplicates ~14 minutes of work. Worse,
+# the rebuild runs as root inside the container, leaving build/sda.img owned by
+# root while QEMU runs as the unprivileged runner user -- which made this test
+# fail with "Could not open build/sda.img: Permission denied".
+#
+# Set SKIP_BUILD=1 to consume pre-built artifacts instead (what CI does).
+# Left unset, the build runs as before for standalone local use.
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+    echo "SKIP_BUILD=1 - using pre-built artifacts in ${BUILD_DIR}"
+    for artifact in "${BUILD_DIR}/kernel/bzImage" "${BUILD_DIR}/initramfs.cpio.gz" "${BUILD_DIR}/sda.img"; do
+        if [ ! -f "${artifact}" ]; then
+            echo "ERROR: SKIP_BUILD=1 but required artifact is missing: ${artifact}"
+            exit 1
+        fi
+    done
+else
+    docker run --rm \
+        -v "${PROJECT_ROOT}:/keelos" \
+        -v "keelos-cargo-cache:/root/.cargo/registry" \
+        -v "keelos-target-cache:/keelos/target" \
+        keelos-builder \
+        /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package keel-init && cargo build --release --target x86_64-unknown-linux-musl --package keel-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
+fi
 
 # 2. Prepare Dummy Update Image
 echo "Creating dummy update image..."

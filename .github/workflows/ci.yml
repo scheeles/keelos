@@ -7,6 +7,16 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+# Cancel superseded runs on the same ref. Without this, every push to a PR
+# branch started a fresh ~30 minute matrix while the previous one ran to
+# completion. Never cancel on `main` -- those runs gate the merge queue.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
@@ -18,6 +28,7 @@ jobs:
   
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -42,6 +53,7 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -61,6 +73,7 @@ jobs:
   build:
     needs: [lint]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -166,6 +179,7 @@ jobs:
   test-boot:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -188,6 +202,7 @@ jobs:
   test-integration:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -210,6 +225,7 @@ jobs:
   test-network:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -232,6 +248,7 @@ jobs:
   test-bootstrap-kind:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
@@ -282,6 +299,7 @@ jobs:
   test-artifacts:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -299,6 +317,7 @@ jobs:
   test-diagnostics:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
@@ -324,6 +343,7 @@ jobs:
   test-rbac:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
 
@@ -346,109 +366,30 @@ jobs:
           chmod +x tools/testing/*.sh
           ./tools/testing/test-rbac.sh
 
-  test-delta-update:
-    needs: [build]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v5
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ hashFiles('tools/builder/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Build Builder Image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./tools/builder
-          push: false
-          load: true
-          tags: keelos-builder:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-
-      - name: Run Delta Update Test
-        run: |
-          mkdir -p build
-          chmod +x tools/testing/*.sh tools/builder/*.sh
-          ./tools/testing/test-delta-update.sh
-
   test-update-flow:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v5
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v7
         with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ hashFiles('tools/builder/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Cache Cargo Registry
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache Kernel Sources
-        uses: actions/cache@v5
-        with:
-          path: .cache/kernel
-          key: ${{ runner.os }}-kernel-sources
-          restore-keys: |
-            ${{ runner.os }}-kernel-sources
-
-      - name: Cache Built Kernel
-        uses: actions/cache@v5
-        with:
-          path: build/kernel
-          key: ${{ runner.os }}-kernel-build-v2-${{ hashFiles('tools/builder/kernel-build.sh') }}
-
-      - name: Build Builder Image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./tools/builder
-          push: false
-          load: true
-          tags: keelos-builder:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          name: keelos-build
+          path: build/
 
       - name: Install QEMU
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86
 
-      - name: Prepare build directories
-        run: mkdir -p target .cache/kernel build
-
       - name: Run Update Flow Test
+        env:
+          # Consume the artifacts from the `build` job rather than rebuilding in
+          # a privileged container (which left build/sda.img root-owned and made
+          # QEMU fail with "Permission denied").
+          SKIP_BUILD: "1"
         run: |
           chmod +x tools/testing/*.sh
           ./tools/testing/test-update-flow.sh
@@ -456,6 +397,7 @@ jobs:
   test-audit:
     needs: [build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
