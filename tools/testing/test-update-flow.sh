@@ -10,12 +10,31 @@ TIMEOUT=180
 echo ">>> Starting Phase 5 Update Test..."
 
 # 1. Setup Disk and Initramfs
-docker run --rm \
-    -v "${PROJECT_ROOT}:/keelos" \
-    -v "keelos-cargo-cache:/root/.cargo/registry" \
-    -v "keelos-target-cache:/keelos/target" \
-    keelos-builder \
-    /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package keel-init && cargo build --release --target x86_64-unknown-linux-musl --package keel-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
+#
+# CI already produces these artifacts in the `build` job and this job declares
+# `needs: [build]`, so rebuilding here duplicates ~14 minutes of work. Worse,
+# the rebuild runs as root inside the container, leaving build/sda.img owned by
+# root while QEMU runs as the unprivileged runner user -- which made this test
+# fail with "Could not open build/sda.img: Permission denied".
+#
+# Set SKIP_BUILD=1 to consume pre-built artifacts instead (what CI does).
+# Left unset, the build runs as before for standalone local use.
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+    echo "SKIP_BUILD=1 - using pre-built artifacts in ${BUILD_DIR}"
+    for artifact in "${BUILD_DIR}/kernel/bzImage" "${BUILD_DIR}/initramfs.cpio.gz" "${BUILD_DIR}/sda.img"; do
+        if [ ! -f "${artifact}" ]; then
+            echo "ERROR: SKIP_BUILD=1 but required artifact is missing: ${artifact}"
+            exit 1
+        fi
+    done
+else
+    docker run --rm \
+        -v "${PROJECT_ROOT}:/keelos" \
+        -v "keelos-cargo-cache:/root/.cargo/registry" \
+        -v "keelos-target-cache:/keelos/target" \
+        keelos-builder \
+        /bin/bash -c "cargo build --release --target x86_64-unknown-linux-musl --package keel-init && cargo build --release --target x86_64-unknown-linux-musl --package keel-agent && cargo build --release --target x86_64-unknown-linux-musl --package osctl && chmod +x ./tools/testing/setup-test-disk.sh && ./tools/testing/setup-test-disk.sh && ./tools/builder/initramfs-build.sh"
+fi
 
 # 2. Prepare Dummy Update Image
 echo "Creating dummy update image..."
@@ -39,11 +58,15 @@ nohup "${PROJECT_ROOT}/tools/testing/run-qemu.sh" > "${LOG_FILE}" 2>&1 &
 QEMU_PID=$!
 trap "kill $QEMU_PID || true; kill $SERVER_PID || true" EXIT
 
-echo "Waiting for Matic Agent and in-VM test..."
-# Wait longer for the 15s delay in keel-init
+echo "Waiting for keel-agent and the in-VM test..."
+# Wait longer for the 15s delay in keel-init.
+#
+# The sentinel is matched case-insensitively: keel-init logs "In-VM update test
+# finished" while this script previously grepped for "in-VM ...", so the
+# case-sensitive match could never succeed and the loop always ran to timeout.
 START_TIME=$(date +%s)
 while true; do
-    if grep -q "in-VM update test finished" "${LOG_FILE}"; then
+    if grep -qi "In-VM update test finished" "${LOG_FILE}"; then
         echo "In-VM test finished!"
         break
     fi
@@ -57,10 +80,25 @@ while true; do
 done
 
 # 6. Verify Logs
+#
+# These strings come from the InstallUpdate progress stream in
+# cmd/keel-agent/src/lib.rs, printed to the console by osctl.
+#
+# The third assertion previously looked for
+#   "Flashing http://10.0.2.2:8080/update.squashfs to /dev/sda3..."
+# which the agent has not emitted for some time -- the progress message is
+# "Downloading and flashing to <device>..." and the URL does not appear in it.
+# The stale string made this check unsatisfiable, though the case-sensitivity
+# bug above meant the script always timed out before ever reaching it.
+#
+# NOTE: this remains a log-scraping test against an 18-byte dummy "image". It
+# does not verify that bytes reached the device, that the SHA matched, that the
+# boot entry changed, or that the system comes up on the other slot after a
+# reboot. Replacing it with a real A/B update test is tracked separately.
 echo "Verifying agent logs..."
 if grep -q "Identifying target partition..." "${LOG_FILE}" && \
    grep -q "Target partition identified: /dev/sda3" "${LOG_FILE}" && \
-   grep -q "Flashing http://10.0.2.2:8080/update.squashfs to /dev/sda3..." "${LOG_FILE}" && \
+   grep -q "Downloading and flashing to /dev/sda3..." "${LOG_FILE}" && \
    grep -q "Update installed successfully" "${LOG_FILE}"; then
     echo "SUCCESS: Update flow verified!"
 else
