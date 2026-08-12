@@ -19,3 +19,6 @@ serde_json = "1.0"
 #Network configuration
 keel-config = { path = "../../pkg/config" }
 
+
+[lints]
+workspace = true

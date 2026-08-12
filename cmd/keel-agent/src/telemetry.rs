@@ -84,10 +84,16 @@ pub struct SystemMetrics {
 }
 
 impl SystemMetrics {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self {
+    /// Create a new system metrics collector.
+    ///
+    /// Infallible: `System::new_all()` cannot fail. This previously returned
+    /// `Result` with no failure path, which forced `Default` to `.expect()` on
+    /// a value that could never be `Err` -- a panic path in a process built
+    /// with panic = "abort".
+    pub fn new() -> Self {
+        Self {
             system: System::new_all(),
-        })
+        }
     }
 
     /// Update system metrics
@@ -128,7 +134,7 @@ impl SystemMetrics {
 
 impl Default for SystemMetrics {
     fn default() -> Self {
-        Self::new().expect("Failed to create SystemMetrics")
+        Self::new()
     }
 }
 
@@ -139,12 +145,13 @@ mod tests {
     #[test]
     fn test_system_metrics_creation() {
         let metrics = SystemMetrics::new();
-        assert!(metrics.is_ok());
+        // Construction is infallible; assert it yields a usable collector.
+        assert!(metrics.total_memory() > 0);
     }
 
     #[test]
     fn test_system_metrics_update() {
-        let mut metrics = SystemMetrics::new().unwrap();
+        let mut metrics = SystemMetrics::new();
         metrics.update();
         // Just verify it doesn't panic
         let _ = metrics.cpu_usage();
