@@ -18,8 +18,9 @@
 //! - `keel:operator` → Operator
 //! - `keel:viewer` → Viewer
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use tonic::{Request, Status};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// RBAC roles ordered by privilege level (lowest to highest).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,32 +89,90 @@ pub fn role_from_cert_der(cert_der: &[u8]) -> Result<Role, String> {
     Err("No recognized RBAC role in certificate Organization field".to_string())
 }
 
-/// Authorize a gRPC request against the required role.
+/// Whether the gRPC server was started with client-certificate verification
+/// configured.
 ///
-/// Extracts the client certificate from the TLS peer connection info
-/// and checks that the certificate's role has sufficient privilege.
+/// `Request::peer_certs()` returns `None` both when the server is running in
+/// plaintext development mode *and* when a client connects over TLS without
+/// presenting a certificate. Those two cases require opposite decisions, and
+/// they are indistinguishable from the request alone, so the server records its
+/// own TLS state here at startup.
+static TLS_ENFORCED: AtomicBool = AtomicBool::new(false);
+
+/// Record whether the server is enforcing client certificates.
 ///
-/// When TLS is not configured (development mode), all requests are allowed.
+/// Called once by `main` after the TLS configuration outcome is known. When
+/// this is `false`, unauthenticated requests are permitted so the agent remains
+/// usable in local development and in the QEMU test harness.
+pub fn set_tls_enforced(enforced: bool) {
+    TLS_ENFORCED.store(enforced, Ordering::Relaxed);
+    if enforced {
+        info!("RBAC: client certificates required for all authorized endpoints");
+    } else {
+        warn!(
+            "RBAC: TLS is not configured - authorization is DISABLED and every \
+             endpoint is reachable anonymously. Development use only."
+        );
+    }
+}
+
+/// Whether client certificates are currently required.
+pub fn is_tls_enforced() -> bool {
+    TLS_ENFORCED.load(Ordering::Relaxed)
+}
+
+/// The client certificate material associated with a request.
 ///
-/// # Errors
+/// Modelled explicitly so the authorization decision can be unit tested for
+/// every case without standing up a TLS connection.
+#[derive(Debug, Clone, Copy)]
+enum PeerIdentity<'a> {
+    /// No TLS peer information at all — a plaintext connection.
+    NoTls,
+    /// A TLS connection whose client certificate chain was empty.
+    EmptyChain,
+    /// A TLS connection presenting a leaf certificate (DER-encoded).
+    Leaf(&'a [u8]),
+}
+
+/// Decide whether a request is authorized.
 ///
-/// Returns `Status::unauthenticated` if no valid client certificate is present.
-/// Returns `Status::permission_denied` if the client's role is insufficient.
-pub fn authorize<T>(request: &Request<T>, required: Role) -> Result<(), Status> {
-    let Some(peer_certs) = request.peer_certs() else {
-        // No TLS peer certs — either TLS is not configured (dev mode)
-        // or client connected without a certificate.
-        // When mTLS is properly configured, tonic validates the cert chain;
-        // absence of peer_certs here means TLS is disabled entirely.
-        debug!("No peer certificates found — allowing request (TLS may be disabled)");
-        return Ok(());
+/// Pure function: no global state, no I/O. `authorize` is a thin wrapper that
+/// supplies `tls_enforced` and the peer certificate from the live request.
+fn authorize_decision(
+    peer: PeerIdentity<'_>,
+    tls_enforced: bool,
+    required: Role,
+) -> Result<(), Status> {
+    let leaf = match peer {
+        PeerIdentity::Leaf(der) => der,
+        PeerIdentity::NoTls | PeerIdentity::EmptyChain => {
+            if tls_enforced {
+                // The server is configured for mTLS and the caller presented no
+                // certificate. Deny.
+                //
+                // This previously returned Ok(()), which meant any peer that
+                // simply omitted its client certificate was granted Admin --
+                // the server binds 0.0.0.0:50051 and sets client_auth_optional
+                // so that InitBootstrap can be reached during enrolment, so
+                // certless connections are accepted at the TLS layer by design.
+                warn!(
+                    required_role = %required,
+                    "RBAC: denying request with no client certificate"
+                );
+                return Err(Status::unauthenticated(
+                    "a client certificate is required for this operation",
+                ));
+            }
+            debug!(
+                required_role = %required,
+                "RBAC: TLS not configured - allowing unauthenticated request (development mode)"
+            );
+            return Ok(());
+        }
     };
 
-    let first_cert = peer_certs
-        .first()
-        .ok_or_else(|| Status::unauthenticated("Client certificate chain is empty"))?;
-
-    let client_role = role_from_cert_der(first_cert.as_ref()).map_err(|e| {
+    let client_role = role_from_cert_der(leaf).map_err(|e| {
         warn!(error = %e, "RBAC: failed to extract role from client certificate");
         Status::permission_denied(format!("Unrecognized client certificate role: {e}"))
     })?;
@@ -135,6 +194,30 @@ pub fn authorize<T>(request: &Request<T>, required: Role) -> Result<(), Status> 
             "Role '{client_role}' does not have permission for this operation (requires '{required}')"
         )))
     }
+}
+
+/// Authorize a gRPC request against the required role.
+///
+/// Extracts the client certificate from the TLS peer connection info
+/// and checks that the certificate's role has sufficient privilege.
+///
+/// When the server is not running with TLS, all requests are allowed so the
+/// agent stays usable in development. When TLS *is* configured, a request
+/// without a client certificate is rejected.
+///
+/// # Errors
+///
+/// Returns `Status::unauthenticated` if no valid client certificate is present.
+/// Returns `Status::permission_denied` if the client's role is insufficient.
+pub fn authorize<T>(request: &Request<T>, required: Role) -> Result<(), Status> {
+    let peer_certs = request.peer_certs();
+    let peer = match peer_certs.as_deref().map(Vec::as_slice) {
+        None => PeerIdentity::NoTls,
+        Some([]) => PeerIdentity::EmptyChain,
+        Some([leaf, ..]) => PeerIdentity::Leaf(leaf.as_ref()),
+    };
+
+    authorize_decision(peer, is_tls_enforced(), required)
 }
 
 #[cfg(test)]
@@ -231,14 +314,95 @@ mod tests {
         assert!(role.unwrap_err().contains("Failed to parse"));
     }
 
-    // --- authorize() tests (without TLS — dev mode) ---
+    // --- authorize_decision() tests ---
+    //
+    // These exercise the pure decision function directly, which covers every
+    // combination of peer identity and TLS mode without needing a live TLS
+    // connection. The e2e suite additionally proves the same rules hold over a
+    // real mTLS transport.
 
     #[test]
-    fn test_authorize_no_tls_allows_all() {
-        // Without TLS, peer_certs() returns None, so all requests are allowed
-        let request = Request::new(());
-        assert!(authorize(&request, Role::Admin).is_ok());
-        assert!(authorize(&request, Role::Operator).is_ok());
-        assert!(authorize(&request, Role::Viewer).is_ok());
+    fn test_no_client_cert_is_denied_when_tls_enforced() {
+        // The regression this guards: `authorize` used to return Ok(()) here,
+        // so any peer that omitted its client certificate was granted Admin.
+        for required in [Role::Admin, Role::Operator, Role::Viewer] {
+            let err = authorize_decision(PeerIdentity::NoTls, true, required)
+                .expect_err("certless request must be denied when TLS is enforced");
+            assert_eq!(err.code(), tonic::Code::Unauthenticated);
+
+            let err = authorize_decision(PeerIdentity::EmptyChain, true, required)
+                .expect_err("empty chain must be denied when TLS is enforced");
+            assert_eq!(err.code(), tonic::Code::Unauthenticated);
+        }
+    }
+
+    #[test]
+    fn test_no_client_cert_is_allowed_when_tls_not_configured() {
+        // Development mode: the agent must stay usable without certificates,
+        // including in the QEMU test harness.
+        for required in [Role::Admin, Role::Operator, Role::Viewer] {
+            assert!(authorize_decision(PeerIdentity::NoTls, false, required).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_admin_cert_satisfies_every_role() {
+        let der = generate_cert_with_org("keel:admin");
+        for required in [Role::Admin, Role::Operator, Role::Viewer] {
+            assert!(authorize_decision(PeerIdentity::Leaf(&der), true, required).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_viewer_cert_is_denied_operator_and_admin_operations() {
+        let der = generate_cert_with_org("keel:viewer");
+
+        assert!(authorize_decision(PeerIdentity::Leaf(&der), true, Role::Viewer).is_ok());
+
+        for required in [Role::Operator, Role::Admin] {
+            let err = authorize_decision(PeerIdentity::Leaf(&der), true, required)
+                .expect_err("viewer must not be granted a higher-privileged operation");
+            assert_eq!(err.code(), tonic::Code::PermissionDenied);
+        }
+    }
+
+    #[test]
+    fn test_operator_cert_is_denied_admin_operations() {
+        let der = generate_cert_with_org("keel:operator");
+
+        assert!(authorize_decision(PeerIdentity::Leaf(&der), true, Role::Operator).is_ok());
+        assert!(authorize_decision(PeerIdentity::Leaf(&der), true, Role::Viewer).is_ok());
+
+        let err = authorize_decision(PeerIdentity::Leaf(&der), true, Role::Admin)
+            .expect_err("operator must not be granted an admin operation");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[test]
+    fn test_unrecognized_org_is_denied_even_with_valid_cert() {
+        let der = generate_cert_with_org("some-other-org");
+        let err = authorize_decision(PeerIdentity::Leaf(&der), true, Role::Viewer)
+            .expect_err("a certificate with no known role must be denied");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[test]
+    fn test_role_checks_still_apply_when_tls_not_enforced_but_cert_present() {
+        // A presented certificate is always evaluated on its merits; the
+        // development-mode bypass only covers the *absence* of a certificate.
+        let der = generate_cert_with_org("keel:viewer");
+        let err = authorize_decision(PeerIdentity::Leaf(&der), false, Role::Admin)
+            .expect_err("a viewer cert must not reach an admin operation");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[test]
+    fn test_tls_enforced_flag_roundtrip() {
+        // Default is fail-open so that a server which never calls
+        // set_tls_enforced (tests, dev) keeps working.
+        set_tls_enforced(true);
+        assert!(is_tls_enforced());
+        set_tls_enforced(false);
+        assert!(!is_tls_enforced());
     }
 }

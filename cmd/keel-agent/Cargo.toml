@@ -18,6 +18,10 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
 tokio-cron-scheduler = "0.15"
 tonic = { version = "0.14", features = ["tls-webpki-roots"] }
+# Explicit rustls dependency so the process-wide CryptoProvider can be installed
+# at startup. Both aws-lc-rs and ring are present transitively, so rustls cannot
+# auto-select one and panics on first TLS use. See main().
+rustls = "0.23"
 http = "1"
 prost = "0.14"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
