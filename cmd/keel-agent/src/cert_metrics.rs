@@ -30,8 +30,13 @@ pub struct CertificateMetrics {
 }
 
 impl CertificateMetrics {
-    /// Create new certificate metrics collector
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    /// Create new certificate metrics collector.
+    ///
+    /// Infallible: registering observable gauges and counters with the
+    /// OpenTelemetry meter cannot fail. This previously returned `Result` with
+    /// no failure path, which forced both `Default` and the `CERT_METRICS`
+    /// static to `.expect()` on a value that could never be `Err`.
+    pub fn new() -> Self {
         let meter = global::meter("keel_agent");
 
         let cert_state: Arc<Mutex<Option<CertState>>> = Arc::new(Mutex::new(None));
@@ -63,7 +68,7 @@ impl CertificateMetrics {
             })
             .build();
 
-        Ok(Self {
+        Self {
             renewals_success_counter: meter
                 .u64_counter("keel.certificate.renewals.success")
                 .with_description("Count of successful certificate renewals")
@@ -75,7 +80,7 @@ impl CertificateMetrics {
                 .build(),
 
             cert_state,
-        })
+        }
     }
     /// Update certificate expiry metrics from certificate file
     pub fn update_cert_expiry(&self, cert_path: &str) {
@@ -140,15 +145,13 @@ impl CertificateMetrics {
 
 impl Default for CertificateMetrics {
     fn default() -> Self {
-        Self::new().expect("Failed to create CertificateMetrics")
+        Self::new()
     }
 }
 
 /// Global certificate metrics instance
 static CERT_METRICS: once_cell::sync::Lazy<Arc<CertificateMetrics>> =
-    once_cell::sync::Lazy::new(|| {
-        Arc::new(CertificateMetrics::new().expect("Failed to initialize certificate metrics"))
-    });
+    once_cell::sync::Lazy::new(|| Arc::new(CertificateMetrics::new()));
 
 /// Get global certificate metrics instance
 pub fn cert_metrics() -> Arc<CertificateMetrics> {
@@ -161,7 +164,9 @@ mod tests {
 
     #[test]
     fn test_certificate_metrics_creation() {
+        // Construction is infallible; assert it yields a usable collector with
+        // no certificate state recorded yet.
         let metrics = CertificateMetrics::new();
-        assert!(metrics.is_ok());
+        assert!(metrics.cert_state.lock().is_ok_and(|s| s.is_none()));
     }
 }

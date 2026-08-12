@@ -424,25 +424,23 @@ impl DnsConfig {
 impl RouteConfig {
     /// Validate route configuration
     fn validate(&self) -> Result<(), NetworkConfigError> {
-        // Validate destination CIDR
-        self.destination
-            .parse::<Ipv4Network>()
-            .or_else(|_| {
-                self.destination
-                    .parse::<Ipv6Network>()
-                    .map(|_| Ipv4Network::new(Ipv4Addr::new(0, 0, 0, 0), 0).unwrap())
-            })
-            .map_err(|_| NetworkConfigError::InvalidCidr(self.destination.clone()))?;
+        // Destination must be a valid IPv4 or IPv6 CIDR.
+        //
+        // Previously this chained `or_else` and mapped a successful IPv6 parse
+        // onto a throwaway `Ipv4Network::new(0.0.0.0, 0).unwrap()` purely to
+        // make both branches share a type. The dummy value was never read, and
+        // the unwrap was a panic path in a library used by PID 1. Testing the
+        // two parses directly expresses the same rule without either.
+        if self.destination.parse::<Ipv4Network>().is_err()
+            && self.destination.parse::<Ipv6Network>().is_err()
+        {
+            return Err(NetworkConfigError::InvalidCidr(self.destination.clone()));
+        }
 
-        // Validate gateway IP
-        self.gateway
-            .parse::<Ipv4Addr>()
-            .or_else(|_| {
-                self.gateway
-                    .parse::<Ipv6Addr>()
-                    .map(|_| Ipv4Addr::new(0, 0, 0, 0))
-            })
-            .map_err(|_| NetworkConfigError::InvalidIpAddress(self.gateway.clone()))?;
+        // Gateway must be a valid IPv4 or IPv6 address.
+        if self.gateway.parse::<Ipv4Addr>().is_err() && self.gateway.parse::<Ipv6Addr>().is_err() {
+            return Err(NetworkConfigError::InvalidIpAddress(self.gateway.clone()));
+        }
 
         Ok(())
     }
@@ -573,6 +571,54 @@ mod tests {
             search_domains: vec![],
         };
         assert!(invalid.validate().is_err());
+    }
+
+    /// Build a `RouteConfig` for validation tests.
+    fn route(destination: &str, gateway: &str) -> RouteConfig {
+        RouteConfig {
+            destination: destination.to_string(),
+            gateway: gateway.to_string(),
+            metric: None,
+        }
+    }
+
+    #[test]
+    fn test_route_config_validation_accepts_ipv4_and_ipv6() {
+        assert!(route("10.0.0.0/8", "192.168.1.1").validate().is_ok());
+        assert!(route("0.0.0.0/0", "10.0.2.2").validate().is_ok());
+        assert!(route("2001:db8::/32", "fe80::1").validate().is_ok());
+        // Mixed families are accepted: each field is validated independently.
+        assert!(route("2001:db8::/32", "192.168.1.1").validate().is_ok());
+    }
+
+    #[test]
+    fn test_route_config_validation_rejects_bad_destination() {
+        let err = route("not-a-cidr", "192.168.1.1").validate().unwrap_err();
+        assert!(matches!(err, NetworkConfigError::InvalidCidr(_)));
+
+        let err = route("10.0.0.0/33", "192.168.1.1").validate().unwrap_err();
+        assert!(matches!(err, NetworkConfigError::InvalidCidr(_)));
+    }
+
+    #[test]
+    fn test_route_config_validation_accepts_bare_address_as_host_route() {
+        // `ipnetwork` parses a bare address as a host route (/32 or /128), so a
+        // destination without an explicit prefix is accepted. Documented here
+        // because it is surprising: "10.0.0.1" is a valid destination.
+        assert!(route("10.0.0.1", "192.168.1.1").validate().is_ok());
+        assert!(route("2001:db8::1", "fe80::1").validate().is_ok());
+    }
+
+    #[test]
+    fn test_route_config_validation_rejects_bad_gateway() {
+        let err = route("10.0.0.0/8", "not-an-ip").validate().unwrap_err();
+        assert!(matches!(err, NetworkConfigError::InvalidIpAddress(_)));
+
+        // A CIDR is not a valid gateway address.
+        let err = route("10.0.0.0/8", "192.168.1.1/24")
+            .validate()
+            .unwrap_err();
+        assert!(matches!(err, NetworkConfigError::InvalidIpAddress(_)));
     }
 
     #[test]

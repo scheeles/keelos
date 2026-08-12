@@ -15,3 +15,6 @@ tonic-prost-build = "0.14"
 [lib]
 name = "keel_api"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

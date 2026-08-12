@@ -17,3 +17,6 @@ pem = "3.0"
 [lib]
 name = "keel_crypto"
 path = "src/lib.rs"
+
+[lints]
+workspace = true

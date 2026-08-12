@@ -221,14 +221,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let health_router = health::create_health_router(health_state);
 
+    // Start health/metrics HTTP server.
+    //
+    // Errors are returned rather than `.expect()`ed. The agent is built with
+    // panic = "abort", so a panic inside a spawned task takes down the whole
+    // process -- and because the process is already gone, the JoinHandle never
+    // resolves and the `tokio::select!` below could never report it. Returning
+    // a Result makes that error handling reachable. In practice this fires when
+    // the health port is already bound, which previously produced a silent
+    // abort and an endless restart loop under keel-init's supervisor.
     let health_server = tokio::spawn(async move {
         info!("Starting health/metrics HTTP server");
         let listener = tokio::net::TcpListener::bind(health_addr)
             .await
-            .expect("Failed to bind health server");
+            .map_err(|e| format!("failed to bind health server on {health_addr}: {e}"))?;
         axum::serve(listener, health_router)
             .await
-            .expect("Health server failed");
+            .map_err(|e| format!("health server terminated: {e}"))?;
+        Ok::<(), String>(())
     });
 
     // Start rollback supervisor
@@ -258,8 +268,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         result = health_server => {
-            if let Err(e) = result {
-                warn!(error = %e, "Health server error");
+            match result {
+                Ok(Ok(())) => info!("Health server stopped"),
+                Ok(Err(e)) => error!(error = %e, "Health server error"),
+                Err(e) => error!(error = %e, "Health server task failed to join"),
             }
         }
     }

@@ -49,8 +49,15 @@ fn main() {
 
 /// Main init logic - all errors are propagated but never cause a panic
 fn run() -> Result<(), InitError> {
-    // Set safe umask
-    umask(Mode::from_bits(0o077).unwrap());
+    // Set safe umask (owner-only: 0o077).
+    //
+    // Constructed with `Mode::from_bits_truncate` rather than
+    // `from_bits(..).unwrap()`. This is PID 1 compiled with panic = "abort", so
+    // any panic here aborts init and the kernel halts with
+    // "Attempted to kill init". 0o077 is a valid mode so the unwrap could not
+    // actually fire, but a panic path must not exist in PID 1 at all -- and it
+    // is the very first statement of run(), before any error handling exists.
+    umask(Mode::from_bits_truncate(0o077));
 
     // Set PATH - as PID 1, we have no inherited PATH from a parent process.
     // Child processes (kubelet, containerd, etc.) need this to find binaries like mount.

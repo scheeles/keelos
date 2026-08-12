@@ -10,6 +10,14 @@ warn-on-all-wildcard-imports = true
 cognitive-complexity-threshold = 15
 
 # Ensure error handling is explicit
-# This helps prevent accidental unwraps in PID 1 code
-# Note: allow-unwrap-in-tests and allow-expect-in-tests are controlled via workspace.lints in Cargo.toml
+# This helps prevent accidental unwraps in PID 1 code.
+#
+# unwrap_used / expect_used / panic are denied workspace-wide in Cargo.toml.
+# Test code is exempt: these settings live in clippy.toml, NOT in
+# [workspace.lints] as the previous comment here claimed. Without them the
+# denials would apply to #[cfg(test)] modules too and every existing test
+# assertion would fail to compile.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
 
