@@ -1484,6 +1484,7 @@ dependencies = [
  "prost",
  "rcgen",
  "reqwest 0.13.2",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

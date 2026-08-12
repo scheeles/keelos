@@ -102,6 +102,19 @@ async fn init_k8s_certificates() -> Option<(String, String)> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Install the process-wide rustls CryptoProvider before any TLS is used.
+    //
+    // Both aws-lc-rs and ring are present in the dependency graph (via tonic,
+    // reqwest and kube), so rustls cannot determine a default provider on its
+    // own and panics on first use with "Could not automatically determine the
+    // process-level CryptoProvider". Nothing in the tree installed one, which
+    // means enabling mTLS would have aborted the agent at runtime. Matches the
+    // provider selected for osctl.
+    //
+    // `install_default` returns Err if a provider is already installed, which is
+    // benign here.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     // Initialize OpenTelemetry telemetry
     let otlp_endpoint = std::env::var("OTLP_ENDPOINT").ok();
     telemetry::init_telemetry("keel-agent", otlp_endpoint)?;
@@ -195,11 +208,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(operational_ca_path.to_string()),
     );
 
+    // Track whether client certificates are actually being verified. RBAC needs
+    // this because `Request::peer_certs()` returns None both for a plaintext
+    // connection and for a TLS client that presented no certificate, and those
+    // two cases must be decided differently.
+    let mut tls_enforced = false;
+
     if tls_manager.can_configure() {
         info!("Enabling mTLS with dual-CA support (bootstrap + operational)");
         match tls_manager.build_tls_config() {
             Ok(tls_config) => {
                 builder = builder.tls_config(tls_config)?;
+                tls_enforced = true;
                 info!("mTLS enabled successfully");
             }
             Err(e) => {
@@ -213,6 +233,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         info!("To enable mTLS, generate server certificate and key.");
     }
+
+    // Must happen before the server starts accepting requests.
+    keel_agent::rbac::set_tls_enforced(tls_enforced);
 
     // Start health/metrics HTTP server
     let metrics = Arc::new(RwLock::new(telemetry::SystemMetrics::default()));
